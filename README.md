@@ -86,6 +86,13 @@ name. If no logo has that exact name the card falls back to showing the brand
 name underneath, and the admin panel flags it on the brand header so you know
 which logo is missing.
 
+**How videos play.** An uploaded video plays in its own card, in place. Starting
+one stops whatever else was playing, so only ever one video runs at a time. The
+play and pause chrome stays hidden until you hover over the card — on a phone,
+where there is no hover, it appears once playback starts so there is still a way
+to pause. Posts embedded from Instagram or TikTok open in an overlay instead,
+because the provider's own player has to run in a frame.
+
 ### What a link can be
 
 - An **Instagram, TikTok, YouTube or Vimeo post** plays as an embed inside the
@@ -100,6 +107,28 @@ which logo is missing.
 Uploading the file gives the best result: it plays inline, starts instantly, and
 carries no third-party UI. Use links when the file is too large to upload or you
 would rather point at the original post.
+
+### Uploading a folder of videos at once
+
+`scripts/Upload-Videos.ps1` uploads a whole folder in one go instead of adding
+each video by hand. Name each file after the brand — `Joto Ramen.mp4`,
+`joto-ramen-2.mp4`, `Safaricom.mp4` — and run it from the repository root in
+PowerShell:
+
+```powershell
+.\scripts\Upload-Videos.ps1 -Folder "$env:USERPROFILE\Videos\Brands" -Email you@example.com
+```
+
+It prints what it is about to do and waits for you to confirm before uploading
+anything. Add `-WhatIf` to see the plan and stop there.
+
+Matching ignores case, dashes and underscores, and a trailing number, so
+`joto-ramen-2.mp4` belongs to "Joto Ramen". Several files for one brand fill
+that brand's empty cells first, and the script creates extra cells when a brand
+has more videos than cells. Files it cannot match to a brand, and files over the
+size limit, are listed as skipped rather than silently dropped.
+
+You are prompted for your admin password each run; it is never stored.
 
 **Client logos.** Upload a logo, give it a name, and it joins the "In
 collaboration with" strip. *Fit* chooses between filling the circle and sitting

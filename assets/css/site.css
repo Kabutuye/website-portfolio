@@ -413,7 +413,7 @@ footer { padding: 28px 0; text-align: center; font-size: 0.72rem; letter-spacing
 }
 
 /* A slot that holds a playable video */
-button.slot {
+.slot.has-video {
   font: inherit;
   color: inherit;
   cursor: pointer;
@@ -421,12 +421,12 @@ button.slot {
   border-width: 1.5px;
   transition: transform 0.25s ease, box-shadow 0.25s ease;
 }
-button.slot:hover, button.slot:focus-visible {
+.slot.has-video:hover, .slot.has-video:focus-visible {
   box-shadow: 0 16px 34px rgba(42, 27, 18, 0.22);
 }
-.brand-card:nth-child(3n+1) button.slot:hover { transform: rotate(-1.6deg) translateY(-4px); }
-.brand-card:nth-child(3n+2) button.slot:hover { transform: rotate(1.2deg) translateY(-4px); }
-.brand-card:nth-child(3n) button.slot:hover   { transform: rotate(-0.6deg) translateY(-4px); }
+.brand-card:nth-child(3n+1) .slot.has-video:hover { transform: rotate(-1.6deg) translateY(-4px); }
+.brand-card:nth-child(3n+2) .slot.has-video:hover { transform: rotate(1.2deg) translateY(-4px); }
+.brand-card:nth-child(3n) .slot.has-video:hover   { transform: rotate(-0.6deg) translateY(-4px); }
 
 .slot.has-video {
   border-style: solid;
@@ -447,7 +447,7 @@ button.slot:hover, button.slot:focus-visible {
   transition: transform 0.25s ease;
 }
 .slot.has-video .play-badge svg { width: 15px; height: 15px; margin-left: 3px; }
-button.slot.has-video:hover .play-badge { transform: translate(-50%, -50%) scale(1.12); }
+.slot.has-video.has-video:hover .play-badge { transform: translate(-50%, -50%) scale(1.12); }
 
 .slot-caption {
   position: absolute; left: 0; right: 0; bottom: 0;
@@ -573,3 +573,47 @@ body.no-scroll { overflow: hidden; }
   display: block;
 }
 .lightbox video[hidden], .lightbox iframe[hidden] { display: none; }
+
+/* ---------- Inline playback ---------- */
+.slot.has-video .slot-media { cursor: pointer; }
+
+.play-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  transition: opacity 0.2s ease;
+}
+.slot.is-playing .play-overlay {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Link out to the original post, revealed on hover like the controls. */
+.slot-link {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 4;
+  background: rgba(251, 246, 239, 0.94);
+  color: var(--espresso);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 5px 10px;
+  border-radius: 999px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  box-shadow: 0 4px 10px rgba(42, 27, 18, 0.25);
+}
+.slot:hover .slot-link,
+.slot-link:focus-visible { opacity: 1; }
+@media (hover: none) {
+  .slot-link { opacity: 1; }
+}

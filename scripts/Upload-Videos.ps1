@@ -1,0 +1,225 @@
+<#
+.SYNOPSIS
+  Uploads a folder of brand videos to Supabase and attaches each one to the
+  matching cell on the portfolio.
+
+.DESCRIPTION
+  Matches each video file to a brand by its file name, uploads it to the
+  "videos" storage bucket, and points that brand's cell at it. Files named
+  after the same brand ("Joto Ramen 1.mp4", "Joto Ramen 2.mp4") fill that
+  brand's cells in order, and extra cells are created when a brand has more
+  videos than cells.
+
+  Nothing is uploaded until you have seen the plan and confirmed it.
+
+.PARAMETER Folder
+  The folder holding the videos. Subfolders are ignored.
+
+.PARAMETER Email
+  The admin email you sign in to /admin with. You are prompted for the
+  password; it is never written to disk or into your shell history.
+
+.PARAMETER Yes
+  Skip the confirmation prompt and upload straight away.
+
+.EXAMPLE
+  .\scripts\Upload-Videos.ps1 -Folder "$env:USERPROFILE\Videos\Brands" -Email you@example.com
+
+.EXAMPLE
+  # See what would happen without uploading anything
+  .\scripts\Upload-Videos.ps1 -Folder .\videos -Email you@example.com -WhatIf
+#>
+
+[CmdletBinding(SupportsShouldProcess = $true)]
+param(
+  [Parameter(Mandatory = $true)] [string] $Folder,
+  [Parameter(Mandatory = $true)] [string] $Email,
+  [switch] $Yes
+)
+
+$ErrorActionPreference = 'Stop'
+# Windows PowerShell 5.1 does not always negotiate TLS 1.2 by default.
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+$MaxBytes = 50MB
+$Extensions = @('.mp4', '.mov', '.webm', '.m4v')
+$ContentTypes = @{
+  '.mp4' = 'video/mp4'; '.m4v' = 'video/x-m4v'
+  '.mov' = 'video/quicktime'; '.webm' = 'video/webm'
+}
+
+# ---------------------------------------------------------------- config ---
+# Read the project URL and publishable key from the site's own config, so
+# there is only ever one copy of them.
+$configPath = Join-Path $PSScriptRoot '..\assets\js\config.js'
+if (-not (Test-Path $configPath)) {
+  throw "Cannot find assets/js/config.js. Run this from inside the repository."
+}
+$config = Get-Content $configPath -Raw
+$SupabaseUrl = [regex]::Match($config, "SUPABASE_URL\s*=\s*'([^']+)'").Groups[1].Value
+$SupabaseKey = [regex]::Match($config, "SUPABASE_KEY\s*=\s*'([^']+)'").Groups[1].Value
+if (-not $SupabaseUrl -or -not $SupabaseKey) {
+  throw "Could not read SUPABASE_URL / SUPABASE_KEY from $configPath."
+}
+
+if (-not (Test-Path $Folder)) { throw "Folder not found: $Folder" }
+
+# ------------------------------------------------------------------ auth ---
+$secure = Read-Host -Prompt "Password for $Email" -AsSecureString
+$plain = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
+  [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure))
+
+Write-Host "Signing in..." -ForegroundColor Cyan
+try {
+  $auth = Invoke-RestMethod -Method Post `
+    -Uri "$SupabaseUrl/auth/v1/token?grant_type=password" `
+    -Headers @{ apikey = $SupabaseKey } `
+    -ContentType 'application/json' `
+    -Body (@{ email = $Email; password = $plain } | ConvertTo-Json)
+} catch {
+  throw "Sign in failed. Check the email and password. ($($_.Exception.Message))"
+} finally {
+  $plain = $null
+}
+
+$token = $auth.access_token
+$authHeaders = @{ apikey = $SupabaseKey; Authorization = "Bearer $token" }
+
+# Writing needs a row in public.admins, not just a valid login.
+$admin = Invoke-RestMethod -Uri "$SupabaseUrl/rest/v1/admins?select=user_id&limit=1" -Headers $authHeaders
+if (-not $admin) {
+  throw "Signed in, but this account is not an admin. Add it to public.admins first (see README step 3)."
+}
+Write-Host "Signed in as $Email" -ForegroundColor Green
+
+# -------------------------------------------------------------- matching ---
+function Get-BrandKey {
+  param([string] $Name)
+  $n = $Name.ToLowerInvariant()
+  $n = $n -replace '[_\-]+', ' '
+  # Drop a trailing counter: "joto ramen 2" and "joto ramen" are one brand.
+  $n = $n -replace '\s+\d+\s*$', ''
+  ($n -replace '\s+', ' ').Trim()
+}
+
+$projects = Invoke-RestMethod -Headers $authHeaders `
+  -Uri "$SupabaseUrl/rest/v1/projects?select=*&order=category,sort_order,created_at"
+
+$cellsByBrand = @{}
+foreach ($p in $projects) {
+  $key = Get-BrandKey $p.brand_name
+  if (-not $cellsByBrand.ContainsKey($key)) { $cellsByBrand[$key] = @() }
+  $cellsByBrand[$key] += $p
+}
+
+$files = Get-ChildItem -Path $Folder -File |
+  Where-Object { $Extensions -contains $_.Extension.ToLowerInvariant() } |
+  Sort-Object Name
+
+if (-not $files) { throw "No video files ($($Extensions -join ', ')) found in $Folder" }
+
+$plan = @()
+$problems = @()
+
+foreach ($group in ($files | Group-Object { Get-BrandKey $_.BaseName })) {
+  $key = $group.Name
+  $cells = @($cellsByBrand[$key])
+
+  if (-not $cells -or $cells.Count -eq 0) {
+    foreach ($f in $group.Group) {
+      $problems += [pscustomobject]@{ File = $f.Name; Reason = "No brand named '$($group.Group[0].BaseName)' on the site" }
+    }
+    continue
+  }
+
+  # Fill this brand's empty cells first, then cells that already have a video.
+  $ordered = @($cells | Where-Object { -not $_.video_url }) + @($cells | Where-Object { $_.video_url })
+  $i = 0
+  foreach ($f in $group.Group) {
+    if ($f.Length -gt $MaxBytes) {
+      $problems += [pscustomobject]@{
+        File = $f.Name
+        Reason = "{0:N1} MB is over the {1:N0} MB limit" -f ($f.Length / 1MB), ($MaxBytes / 1MB)
+      }
+      continue
+    }
+    $cell = if ($i -lt $ordered.Count) { $ordered[$i] } else { $null }
+    $plan += [pscustomobject]@{
+      File     = $f
+      Brand    = $cells[0].brand_name
+      Category = $cells[0].category
+      Cell     = $cell               # $null means a new cell gets created
+      Replaces = if ($cell -and $cell.video_url) { $true } else { $false }
+    }
+    $i++
+  }
+}
+
+# ------------------------------------------------------------------ plan ---
+Write-Host ""
+Write-Host "Plan" -ForegroundColor Cyan
+foreach ($item in $plan) {
+  $what = if (-not $item.Cell) { "new cell" }
+          elseif ($item.Replaces) { "REPLACES the video already on this cell" }
+          else { "empty cell" }
+  "{0,-42} -> {1} / {2}  ({3}, {4:N1} MB)" -f `
+    $item.File.Name, $item.Category, $item.Brand, $what, ($item.File.Length / 1MB) | Write-Host
+}
+if ($problems) {
+  Write-Host ""
+  Write-Host "Skipping" -ForegroundColor Yellow
+  foreach ($p in $problems) { "{0,-42} -- {1}" -f $p.File, $p.Reason | Write-Host }
+}
+Write-Host ""
+Write-Host ("{0} to upload, {1} skipped." -f $plan.Count, $problems.Count)
+
+if ($plan.Count -eq 0) { return }
+if (-not $Yes -and -not $WhatIfPreference) {
+  if ((Read-Host "Continue? (y/n)") -ne 'y') { Write-Host "Nothing uploaded."; return }
+}
+
+# ---------------------------------------------------------------- upload ---
+$done = 0
+foreach ($item in $plan) {
+  $file = $item.File
+  if (-not $PSCmdlet.ShouldProcess($file.Name, "upload to $($item.Brand)")) { continue }
+
+  try {
+    $cell = $item.Cell
+    if (-not $cell) {
+      $lastOrder = ($cellsByBrand[(Get-BrandKey $file.BaseName)] |
+        Measure-Object -Property sort_order -Maximum).Maximum
+      $body = @{
+        category = $item.Category; brand_name = $item.Brand; sort_order = $lastOrder + 1
+      } | ConvertTo-Json
+      $cell = (Invoke-RestMethod -Method Post -Uri "$SupabaseUrl/rest/v1/projects" `
+        -Headers ($authHeaders + @{ Prefer = 'return=representation' }) `
+        -ContentType 'application/json' -Body $body)[0]
+      Write-Host "  created a new cell for $($item.Brand)" -ForegroundColor DarkGray
+    }
+
+    $safe = ($file.Name.ToLowerInvariant() -replace '[^a-z0-9.]+', '-').Trim('-')
+    $objectPath = "projects/$($cell.id)/$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())-$safe"
+    $ctype = $ContentTypes[$file.Extension.ToLowerInvariant()]
+
+    Write-Host ("Uploading {0} ({1:N1} MB)..." -f $file.Name, ($file.Length / 1MB)) -ForegroundColor Cyan
+    Invoke-RestMethod -Method Post `
+      -Uri "$SupabaseUrl/storage/v1/object/$objectPath" `
+      -Headers ($authHeaders + @{ 'x-upsert' = 'true' }) `
+      -ContentType $ctype -InFile $file.FullName | Out-Null
+
+    $publicUrl = "$SupabaseUrl/storage/v1/object/public/$objectPath"
+    $patch = @{ video_url = $publicUrl; video_path = $objectPath } | ConvertTo-Json
+    Invoke-RestMethod -Method Patch -Uri "$SupabaseUrl/rest/v1/projects?id=eq.$($cell.id)" `
+      -Headers $authHeaders -ContentType 'application/json' -Body $patch | Out-Null
+
+    Write-Host "  attached to $($item.Category) / $($item.Brand)" -ForegroundColor Green
+    $done++
+  } catch {
+    Write-Host "  FAILED: $($_.Exception.Message)" -ForegroundColor Red
+  }
+}
+
+Write-Host ""
+Write-Host "$done of $($plan.Count) uploaded." -ForegroundColor Green
+Write-Host "Open /admin to add captions and post links, or reorder anything." -ForegroundColor DarkGray

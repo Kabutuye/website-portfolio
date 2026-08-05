@@ -39,6 +39,91 @@ function buildBadge(brandName) {
   return badge;
 }
 
+// Phones and tablets never fire mouseenter, so on those the controls have to
+// appear as soon as playback starts — otherwise there is no way to pause.
+const CAN_HOVER = window.matchMedia('(hover: hover)').matches;
+
+// A video that plays in the card itself: no chrome until you hover, and the
+// big play badge covering it whenever it is paused.
+function buildInlinePlayer(slot, project, media) {
+  const video = document.createElement('video');
+  video.className = 'slot-media';
+  // Without a poster, #t=0.1 nudges the browser into painting a first frame.
+  video.src = project.poster_url ? media.src : `${media.src}#t=0.1`;
+  if (project.poster_url) video.poster = project.poster_url;
+  video.playsInline = true;
+  video.preload = 'metadata';
+  video.setAttribute('aria-label', `Video — ${project.brand_name}`);
+
+  // The cover carries the play badge and caption while paused, and is what a
+  // visitor clicks — or tabs to — in order to start playback.
+  const cover = document.createElement('button');
+  cover.type = 'button';
+  cover.className = 'play-overlay';
+  cover.setAttribute('aria-label', `Play video — ${project.brand_name}`);
+  cover.insertAdjacentHTML('beforeend', PLAY_BADGE);
+
+  if (project.caption) {
+    const caption = document.createElement('span');
+    caption.className = 'slot-caption';
+    caption.textContent = project.caption;
+    cover.append(caption);
+  }
+
+  const start = () => video.play().catch(() => {});
+  cover.addEventListener('click', start);
+  video.addEventListener('click', () => (video.paused ? start() : video.pause()));
+
+  video.addEventListener('play', () => {
+    slot.classList.add('is-playing');
+    if (!CAN_HOVER || slot.matches(':hover')) video.controls = true;
+  });
+  ['pause', 'ended'].forEach((event) =>
+    video.addEventListener(event, () => {
+      slot.classList.remove('is-playing');
+      video.controls = false;
+    })
+  );
+
+  if (CAN_HOVER) {
+    const show = () => {
+      if (!video.paused) video.controls = true;
+    };
+    const hide = () => {
+      video.controls = false;
+    };
+    slot.addEventListener('mouseenter', show);
+    slot.addEventListener('mouseleave', hide);
+    slot.addEventListener('focusin', show);
+    slot.addEventListener('focusout', hide);
+  }
+
+  slot.append(video, cover);
+
+  if (project.external_url) {
+    const link = document.createElement('a');
+    link.className = 'slot-link';
+    link.href = project.external_url;
+    link.target = '_blank';
+    link.rel = 'noopener';
+    const target = parseMedia(project.external_url);
+    link.textContent = target?.provider ? `View on ${target.provider}` : 'View post';
+    slot.append(link);
+  }
+}
+
+// Only one video plays at a time, anywhere on the page. `play` does not
+// bubble, so this has to listen in the capture phase.
+document.addEventListener(
+  'play',
+  (e) => {
+    for (const other of document.querySelectorAll('video')) {
+      if (other !== e.target && !other.paused) other.pause();
+    }
+  },
+  true
+);
+
 function buildCard(project) {
   const card = document.createElement('div');
   card.className = 'brand-card';
@@ -47,12 +132,18 @@ function buildCard(project) {
   const wrap = document.createElement('div');
   wrap.className = 'slot-wrap';
 
-  const slot = document.createElement(media ? 'button' : 'div');
+  // An uploaded file plays in the card itself. An embed cannot, so those keep
+  // opening the lightbox where the provider's iframe can live.
+  const playsInline = media?.kind === 'file';
+  const slot = document.createElement(media && !playsInline ? 'button' : 'div');
   slot.className = 'slot';
 
-  if (media) {
-    slot.type = 'button';
+  if (playsInline) {
     slot.classList.add('has-video');
+    buildInlinePlayer(slot, project, media);
+  } else if (media) {
+    slot.type = 'button';
+    slot.classList.add('has-video', 'is-embed');
     slot.setAttribute('aria-label', `Play video — ${project.brand_name}`);
 
     if (project.poster_url) {
@@ -62,19 +153,8 @@ function buildCard(project) {
       img.alt = '';
       img.loading = 'lazy';
       slot.append(img);
-    } else if (media.kind === 'file') {
-      // No poster uploaded: let the browser paint the first frame instead.
-      const preview = document.createElement('video');
-      preview.className = 'slot-media';
-      preview.src = `${media.src}#t=0.1`;
-      preview.muted = true;
-      preview.playsInline = true;
-      preview.preload = 'metadata';
-      preview.tabIndex = -1;
-      slot.append(preview);
     } else {
       // An embed cannot give us a frame, so show a tinted card instead.
-      slot.classList.add('is-embed');
       const label = document.createElement('span');
       label.className = 'slot-provider';
       label.textContent = media.provider;
@@ -209,6 +289,9 @@ function openLightbox(project, media, trigger) {
   } else {
     linkOut.hidden = true;
   }
+
+  // Opening an embed should silence anything playing in a card.
+  for (const inline of document.querySelectorAll('video.slot-media')) inline.pause();
 
   lightbox.hidden = false;
   document.body.classList.add('no-scroll');
