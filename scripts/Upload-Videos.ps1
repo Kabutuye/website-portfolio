@@ -77,6 +77,21 @@ function Get-ApiError {
   return $Record.Exception.Message
 }
 
+# Connections to the API drop occasionally. Retry rather than losing a whole
+# run, or a 39 MB upload, to one dropped socket.
+function Invoke-WithRetry {
+  param([scriptblock] $Action, [int] $Retries = 2)
+  for ($attempt = 0; $attempt -le $Retries; $attempt++) {
+    try {
+      return & $Action
+    } catch {
+      if ($attempt -eq $Retries) { throw }
+      Write-Host "  connection dropped, retrying..." -ForegroundColor DarkGray
+      Start-Sleep -Seconds (2 * ($attempt + 1))
+    }
+  }
+}
+
 # ---------------------------------------------------------------- config ---
 # Read the project URL and publishable key from the site's own config, so
 # there is only ever one copy of them.
@@ -123,21 +138,6 @@ if (-not $admin) {
   throw "Signed in, but this account is not an admin. Add it to public.admins first (see README step 3)."
 }
 Write-Host "Signed in as $Email" -ForegroundColor Green
-
-# Connections to the API drop occasionally. Retry rather than losing a whole
-# run, or a 39 MB upload, to one dropped socket.
-function Invoke-WithRetry {
-  param([scriptblock] $Action, [int] $Retries = 2)
-  for ($attempt = 0; $attempt -le $Retries; $attempt++) {
-    try {
-      return & $Action
-    } catch {
-      if ($attempt -eq $Retries) { throw }
-      Write-Host "  connection dropped, retrying..." -ForegroundColor DarkGray
-      Start-Sleep -Seconds (2 * ($attempt + 1))
-    }
-  }
-}
 
 # -------------------------------------------------------------- matching ---
 # File names rarely match a brand name character for character, so both sides
