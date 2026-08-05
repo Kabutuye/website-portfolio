@@ -41,6 +41,12 @@ $ErrorActionPreference = 'Stop'
 # Windows PowerShell 5.1 does not always negotiate TLS 1.2 by default.
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
+# The progress bar makes Invoke-RestMethod dramatically slower on large
+# transfers in Windows PowerShell 5.1.
+$ProgressPreference = 'SilentlyContinue'
+
+$ApiTimeout = 60      # seconds, for the small JSON calls
+$UploadTimeout = 1800 # seconds, enough for a 50 MB file on a slow connection
 $Bucket = 'videos'
 $MaxBytes = 50MB
 $Extensions = @('.mp4', '.mov', '.webm', '.m4v')
@@ -92,7 +98,7 @@ try {
   $auth = Invoke-RestMethod -Method Post `
     -Uri "$SupabaseUrl/auth/v1/token?grant_type=password" `
     -Headers @{ apikey = $SupabaseKey } `
-    -ContentType 'application/json' `
+    -ContentType 'application/json' -TimeoutSec $ApiTimeout `
     -Body (@{ email = $Email; password = $plain } | ConvertTo-Json)
 } catch {
   throw "Sign in failed. Check the email and password. ($(Get-ApiError $_))"
@@ -104,7 +110,8 @@ $token = $auth.access_token
 $authHeaders = @{ apikey = $SupabaseKey; Authorization = "Bearer $token" }
 
 # Writing needs a row in public.admins, not just a valid login.
-$admin = Invoke-RestMethod -Uri "$SupabaseUrl/rest/v1/admins?select=user_id&limit=1" -Headers $authHeaders
+$admin = Invoke-RestMethod -Uri "$SupabaseUrl/rest/v1/admins?select=user_id&limit=1" `
+  -Headers $authHeaders -TimeoutSec $ApiTimeout
 if (-not $admin) {
   throw "Signed in, but this account is not an admin. Add it to public.admins first (see README step 3)."
 }
@@ -152,7 +159,7 @@ function Resolve-BrandKey {
   return $null
 }
 
-$projects = Invoke-RestMethod -Headers $authHeaders `
+$projects = Invoke-RestMethod -Headers $authHeaders -TimeoutSec $ApiTimeout `
   -Uri "$SupabaseUrl/rest/v1/projects?select=*&order=category,sort_order,created_at"
 
 $cellsByBrand = @{}
@@ -265,7 +272,7 @@ foreach ($item in $plan) {
       } | ConvertTo-Json
       $cell = (Invoke-RestMethod -Method Post -Uri "$SupabaseUrl/rest/v1/projects" `
         -Headers ($authHeaders + @{ Prefer = 'return=representation' }) `
-        -ContentType 'application/json' -Body $body)[0]
+        -ContentType 'application/json' -TimeoutSec $ApiTimeout -Body $body)[0]
       Write-Host "  created a new cell for $($item.Brand)" -ForegroundColor DarkGray
     }
 
@@ -277,12 +284,12 @@ foreach ($item in $plan) {
     Invoke-RestMethod -Method Post `
       -Uri "$SupabaseUrl/storage/v1/object/$Bucket/$objectPath" `
       -Headers ($authHeaders + @{ 'x-upsert' = 'true' }) `
-      -ContentType $ctype -InFile $file.FullName | Out-Null
+      -ContentType $ctype -TimeoutSec $UploadTimeout -InFile $file.FullName | Out-Null
 
     $publicUrl = "$SupabaseUrl/storage/v1/object/public/$Bucket/$objectPath"
     $patch = @{ video_url = $publicUrl; video_path = $objectPath } | ConvertTo-Json
     Invoke-RestMethod -Method Patch -Uri "$SupabaseUrl/rest/v1/projects?id=eq.$($cell.id)" `
-      -Headers $authHeaders -ContentType 'application/json' -Body $patch | Out-Null
+      -Headers $authHeaders -ContentType 'application/json' -TimeoutSec $ApiTimeout -Body $patch | Out-Null
 
     Write-Host "  attached to $($item.Category) / $($item.Brand)" -ForegroundColor Green
     $done++
