@@ -4,6 +4,7 @@ import {
   db, upload, removeObject, signIn, signOut, currentSession, currentUser,
 } from './sb.js';
 import { CATEGORIES, VIDEO_BUCKET, IMAGE_BUCKET } from './config.js';
+import { parseMedia, looksLikeVideoFile, brandKey, groupByBrand } from './media.js';
 
 const VIDEO_MAX = 50 * 1024 * 1024;   // matches the bucket limit in schema.sql
 const IMAGE_MAX = 10 * 1024 * 1024;
@@ -132,20 +133,25 @@ async function patchProject(project, fields) {
 
 function buildThumb(project) {
   const thumb = el('div', 'thumb');
+  const media = parseMedia(project.video_url);
+
   if (project.poster_url) {
     const img = el('img');
     img.src = project.poster_url;
     img.alt = '';
     thumb.append(img);
     thumb.classList.add('filled');
-  } else if (project.video_url) {
+  } else if (media?.kind === 'file') {
     const video = el('video');
-    video.src = `${project.video_url}#t=0.1`;
+    video.src = `${media.src}#t=0.1`;
     video.muted = true;
     video.playsInline = true;
     video.preload = 'metadata';
     thumb.append(video);
     thumb.classList.add('filled');
+  } else if (media) {
+    // An embed has no frame we can grab, so say what it is instead.
+    thumb.append(el('span', null, `${media.provider} post`));
   } else {
     thumb.append(el('span', null, 'No video yet'));
   }
@@ -166,8 +172,24 @@ function buildMediaRow(project, kind, row) {
   const status = el('span', 'state');
   const paint = () => {
     const url = project[urlKey];
-    status.textContent = url ? fileLabel(url) : isVideo ? 'Empty cell' : 'Optional still frame';
-    status.classList.toggle('set', Boolean(url));
+    status.classList.remove('set', 'warn');
+
+    if (!url) {
+      status.textContent = isVideo ? 'Empty cell' : 'Optional still frame';
+      return;
+    }
+    const media = isVideo ? parseMedia(url) : null;
+    if (media?.kind === 'embed') {
+      status.textContent = `${media.provider} post — plays as an embed`;
+      status.classList.add('set');
+    } else if (isVideo && !project[pathKey] && !looksLikeVideoFile(url)) {
+      // Neither an upload, a known provider, nor something ending in .mp4.
+      status.textContent = `${fileLabel(url)} — this link is not a video file, so it will not play`;
+      status.classList.add('warn');
+    } else {
+      status.textContent = fileLabel(url);
+      status.classList.add('set');
+    }
   };
   paint();
   wrap.append(status);
@@ -222,7 +244,10 @@ function buildMediaRow(project, kind, row) {
   linkBtn.addEventListener('click', async () => {
     const value = prompt(
       isVideo
-        ? 'Paste the URL of a video file (an .mp4 that is already hosted somewhere):'
+        ? 'Paste a link.\n\n' +
+          '• An Instagram, TikTok, YouTube or Vimeo post plays as an embed.\n' +
+          '• A direct video file (a URL ending in .mp4) plays inline, which ' +
+          'looks better — uploading the file gives you that.'
         : 'Paste the URL of an image to use as the poster:',
       project[urlKey] || ''
     );
@@ -277,14 +302,19 @@ function buildRow(project) {
   brand.setAttribute('aria-label', 'Brand name');
   title.append(brand);
 
-  const siblings = projectsIn(project.category);
-  const index = siblings.findIndex((p) => p.id === project.id);
+  // Reordering here moves a video within its brand. Moving the brand itself
+  // is done from the group header, which keeps the brand's videos together.
+  const group = groupsIn(project.category).find(
+    (g) => g.key === brandKey(project.brand_name)
+  );
+  const index = group ? group.items.findIndex((p) => p.id === project.id) : 0;
+  const size = group ? group.items.length : 1;
   [['↑', -1], ['↓', 1]].forEach(([glyph, delta]) => {
     const btn = el('button', 'btn ghost tiny', glyph);
     btn.type = 'button';
-    btn.title = delta < 0 ? 'Move up' : 'Move down';
-    btn.disabled = index + delta < 0 || index + delta >= siblings.length;
-    btn.addEventListener('click', () => move(project, delta));
+    btn.title = delta < 0 ? 'Move earlier in this brand' : 'Move later in this brand';
+    btn.disabled = index + delta < 0 || index + delta >= size;
+    btn.addEventListener('click', () => moveRow(project, delta));
     title.append(btn);
   });
   body.append(title);
@@ -368,41 +398,144 @@ function buildRow(project) {
   return row;
 }
 
-async function move(project, delta) {
-  const siblings = projectsIn(project.category);
-  const index = siblings.findIndex((p) => p.id === project.id);
-  const other = siblings[index + delta];
-  if (!other) return;
+function groupsIn(slug) {
+  return groupByBrand(projectsIn(slug));
+}
 
-  const mine = project.sort_order;
-  const theirs = other.sort_order;
-  // Equal sort_order values would leave the pair stuck, so re-space them.
-  const [a, b] = mine === theirs ? [index * 10, (index + delta) * 10] : [theirs, mine];
+// Writes a whole category's order back as 10, 20, 30 …, touching only the rows
+// whose value actually changed. Renumbering rather than swapping keeps brands
+// contiguous no matter how the rows got there.
+async function applyOrder(slug, rows) {
+  const writes = rows
+    .map((project, i) => [project, (i + 1) * 10])
+    .filter(([project, target]) => project.sort_order !== target)
+    .map(([project, target]) => patchProject(project, { sort_order: target }));
 
-  await Promise.all([
-    patchProject(project, { sort_order: a }),
-    patchProject(other, { sort_order: b }),
-  ]).catch((err) => toast(err.message, true));
+  if (writes.length) {
+    try {
+      await Promise.all(writes);
+    } catch (err) {
+      toast(err.message, true);
+    }
+  }
   renderProjects();
 }
 
-async function addProject(slug) {
-  const name = prompt('Brand name for the new cell:');
-  if (!name || !name.trim()) return;
-  const existing = projectsIn(slug);
-  const sort = existing.length ? Math.max(...existing.map((p) => p.sort_order)) + 10 : 10;
+async function moveRow(project, delta) {
+  const groups = groupsIn(project.category);
+  const gi = groups.findIndex((g) => g.key === brandKey(project.brand_name));
+  if (gi < 0) return;
+
+  const items = [...groups[gi].items];
+  const i = items.findIndex((p) => p.id === project.id);
+  if (i + delta < 0 || i + delta >= items.length) return;
+  [items[i], items[i + delta]] = [items[i + delta], items[i]];
+
+  await applyOrder(
+    project.category,
+    groups.flatMap((g, k) => (k === gi ? items : g.items))
+  );
+}
+
+async function moveGroup(slug, key, delta) {
+  const groups = groupsIn(slug);
+  const gi = groups.findIndex((g) => g.key === key);
+  if (gi < 0 || gi + delta < 0 || gi + delta >= groups.length) return;
+  [groups[gi], groups[gi + delta]] = [groups[gi + delta], groups[gi]];
+  await applyOrder(slug, groups.flatMap((g) => g.items));
+}
+
+// presetBrand adds another video to an existing brand; without it, asks for a
+// new brand name.
+async function addProject(slug, presetBrand) {
+  let name = presetBrand;
+  if (!name) {
+    name = prompt('Brand name for the new cell:');
+    if (!name || !name.trim()) return;
+  }
+  name = name.trim();
+
+  // Land it directly after the brand's existing videos so it joins that group.
+  const group = groupsIn(slug).find((g) => g.key === brandKey(name));
+  const sort = group
+    ? group.items[group.items.length - 1].sort_order + 1
+    : (projectsIn(slug).at(-1)?.sort_order ?? 0) + 10;
+
   try {
     const [created] = await db.insert('projects', {
       category: slug,
-      brand_name: name.trim(),
+      brand_name: name,
       sort_order: sort,
     });
     state.projects.push(created);
     renderProjects();
-    toast(`Added “${created.brand_name}”.`);
+    toast(presetBrand ? `Added another video for “${name}”.` : `Added “${name}”.`);
   } catch (err) {
     toast(err.message, true);
   }
+}
+
+// One brand and all of its videos, which sit together on the site.
+function buildGroup(slug, group, index, total) {
+  const box = el('div', 'brand-group');
+
+  const head = el('div', 'brand-group-head');
+
+  const logo = state.logos.find((l) => brandKey(l.name) === group.key);
+  const mark = el('span', `group-logo${logo?.fit === 'contain' ? ' contain' : ''}`);
+  if (logo) {
+    const img = el('img');
+    img.src = logo.image_url;
+    img.alt = group.name;
+    if (logo.fit !== 'contain') {
+      img.style.objectPosition = logo.object_position || '50% 45%';
+      const scale = Number(logo.scale);
+      if (scale && scale !== 1) img.style.transform = `scale(${scale})`;
+    }
+    mark.append(img);
+  } else {
+    mark.classList.add('missing');
+    mark.textContent = group.name.slice(0, 1).toUpperCase();
+  }
+  head.append(mark);
+
+  const names = el('div', 'group-names');
+  names.append(el('span', 'group-name', group.name));
+  names.append(
+    el(
+      'span',
+      'group-meta',
+      logo
+        ? `${group.items.length} ${group.items.length === 1 ? 'video' : 'videos'}`
+        : `${group.items.length} ${group.items.length === 1 ? 'video' : 'videos'} · ` +
+            'no logo with this name, so the cards show the brand name instead'
+    )
+  );
+  if (!logo) names.querySelector('.group-meta').classList.add('warn');
+  head.append(names);
+
+  const actions = el('div', 'row-actions');
+  [['↑', -1], ['↓', 1]].forEach(([glyph, delta]) => {
+    const btn = el('button', 'btn ghost tiny', glyph);
+    btn.type = 'button';
+    btn.title = delta < 0 ? 'Move this brand up' : 'Move this brand down';
+    btn.disabled = index + delta < 0 || index + delta >= total;
+    btn.addEventListener('click', () => moveGroup(slug, group.key, delta));
+    actions.append(btn);
+  });
+  const add = el('button', 'btn ghost tiny', 'Add another video');
+  add.type = 'button';
+  add.addEventListener('click', () => addProject(slug, group.name));
+  actions.append(add);
+  head.append(actions);
+
+  box.append(head);
+
+  const list = el('div', 'rows');
+  group.items.forEach((p) => list.append(buildRow(p)));
+  box.append(list);
+
+  return box;
 }
 
 function renderProjects() {
@@ -424,17 +557,21 @@ function renderProjects() {
     const right = el('div', 'row-actions');
     const withVideo = rows.filter((p) => p.video_url).length;
     right.append(el('span', 'count', `${withVideo} of ${rows.length} filled`));
-    const add = el('button', 'btn ghost tiny', 'Add a cell');
+    const add = el('button', 'btn ghost tiny', 'Add a brand');
     add.type = 'button';
     add.addEventListener('click', () => addProject(category.slug));
     right.append(add);
     head.append(left, right);
     block.append(head);
 
-    const list = el('div', 'rows');
-    if (rows.length) rows.forEach((p) => list.append(buildRow(p)));
-    else list.append(el('div', 'empty', 'No cells in this section yet.'));
-    block.append(list);
+    if (!rows.length) {
+      block.append(el('div', 'empty', 'No cells in this section yet.'));
+    } else {
+      const groups = groupsIn(category.slug);
+      groups.forEach((group, gi) => {
+        block.append(buildGroup(category.slug, group, gi, groups.length));
+      });
+    }
 
     frag.append(block);
   }

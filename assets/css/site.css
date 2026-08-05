@@ -404,6 +404,8 @@ footer { padding: 28px 0; text-align: center; font-size: 0.72rem; letter-spacing
 
 /* ---------- Video cells (added) ---------- */
 .brand-card .slot { padding: 0; overflow: hidden; }
+.slot-wrap { position: relative; }
+.brand-card.has-badge { padding-bottom: 34px; }
 .brand-card .slot > .slot-label {
   padding: 16px;
   display: flex; align-items: center; justify-content: center;
@@ -509,3 +511,65 @@ body.no-scroll { overflow: hidden; }
 /* Logos rendered from the database */
 .credits-list li.is-loading { opacity: 0.35; }
 .lightbox[hidden] { display: none; }
+
+/* ---------- Brand logo badge on the frame edge ---------- */
+.brand-badge {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  transform: translate(-50%, 50%);
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--white);
+  border: 2px solid var(--white);
+  box-shadow: 0 8px 20px rgba(42, 27, 18, 0.3);
+  z-index: 3;
+  pointer-events: none;
+  transition: transform 0.25s ease;
+}
+.brand-badge img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.brand-badge.contain img {
+  object-fit: contain;
+  padding: 18%;
+  box-sizing: border-box;
+}
+.slot-wrap:hover .brand-badge { transform: translate(-50%, 50%) scale(1.06); }
+@media (max-width: 520px) {
+  .brand-badge { width: 46px; height: 46px; }
+  .brand-card.has-badge { padding-bottom: 28px; }
+}
+
+/* A card whose video is an external embed has no frame to show. */
+.slot.is-embed {
+  background: color-mix(in srgb, var(--accent) 26%, var(--espresso));
+  border-color: transparent;
+}
+.slot-provider {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(251, 246, 239, 0.75);
+}
+
+/* ---------- Embedded players in the lightbox ---------- */
+.lightbox iframe {
+  width: 100%;
+  height: min(78vh, 740px);
+  border: 0;
+  border-radius: 6px;
+  background: #000;
+  box-shadow: 0 26px 60px rgba(0, 0, 0, 0.55);
+  display: block;
+}
+.lightbox video[hidden], .lightbox iframe[hidden] { display: none; }

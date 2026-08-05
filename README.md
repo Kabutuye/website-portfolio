@@ -59,18 +59,47 @@ Open `https://your-domain/admin` and sign in with the account from step 2.
 ## Using the admin panel
 
 **Videos.** Every cell on the site is one row, grouped under the same six
-sections as the page. For each cell you can:
+sections as the page and, inside each section, by brand. For each cell you can:
 
 - **Upload** an `.mp4` (or `.mov` / `.webm`) straight from your phone or laptop —
   the progress bar shows how far along it is,
-- or **Use a link** if the file is already hosted somewhere,
+- or **Use a link** — see [What a link can be](#what-a-link-can-be) below,
 - add an optional **poster** image (the still shown before playback). Without
   one, the browser uses the first frame of the video,
 - add a **caption** and a **link to the post** — both appear when a visitor
   opens the video,
 - **Show on site** hides a cell without deleting it, which is handy while you
   are still editing something,
-- **↑ / ↓** reorder cells inside a section, and **Add a cell** creates a new one.
+- **↑ / ↓** on a row reorder that brand's videos, **↑ / ↓** on a brand header
+  move the whole brand, **Add another video** adds a second (or third) video to
+  a brand you have already worked with, and **Add a brand** starts a new one.
+
+**Working with a brand more than once.** Add each video to the same brand with
+**Add another video** and they stay side by side on the page — a brand sits
+wherever its first video sits, and all of its videos follow immediately after.
+Brands are matched on name, so "Joto Ramen" and "joto ramen" count as the same
+brand, but "Joto" would be a different one.
+
+**The logo on each frame.** Each card wears its brand's logo in a circle on the
+bottom edge of the video frame, taken from the *Client logos* tab and matched by
+name. If no logo has that exact name the card falls back to showing the brand
+name underneath, and the admin panel flags it on the brand header so you know
+which logo is missing.
+
+### What a link can be
+
+- An **Instagram, TikTok, YouTube or Vimeo post** plays as an embed inside the
+  lightbox. Instagram does not allow the underlying video file to be played
+  directly from another site, so an embed is the only way to show a post that
+  lives there, and the post has to be public.
+- A **direct video file** — a URL ending in `.mp4`, `.mov`, `.webm` — plays
+  inline, with your own poster frame and no platform branding.
+- **Anything else**, including an ordinary Instagram profile link, cannot play.
+  The admin panel says so on the row rather than leaving you with a dead card.
+
+Uploading the file gives the best result: it plays inline, starts instantly, and
+carries no third-party UI. Use links when the file is too large to upload or you
+would rather point at the original post.
 
 **Client logos.** Upload a logo, give it a name, and it joins the "In
 collaboration with" strip. *Fit* chooses between filling the circle and sitting

@@ -6,22 +6,51 @@
 
 import { db } from './sb.js';
 import { CATEGORIES } from './config.js';
+import { parseMedia, brandKey, groupByBrand } from './media.js';
 
 const PLAY_BADGE =
   '<span class="play-badge"><svg viewBox="0 0 10 10" aria-hidden="true">' +
   '<polygon points="1,0 10,5 1,10" fill="#2a1b12"/></svg></span>';
 
+// brandKey -> logo row, so a card can wear its brand's logo.
+let logoByBrand = new Map();
+
 /* ------------------------------------------------------------ rendering --- */
+
+function buildBadge(brandName) {
+  const logo = logoByBrand.get(brandKey(brandName));
+  if (!logo) return null;
+
+  const badge = document.createElement('span');
+  badge.className = logo.fit === 'contain' ? 'brand-badge contain' : 'brand-badge';
+  badge.title = brandName;
+
+  const img = document.createElement('img');
+  img.src = logo.image_url;
+  img.alt = brandName;
+  img.loading = 'lazy';
+  if (logo.fit !== 'contain') {
+    img.style.objectPosition = logo.object_position || '50% 45%';
+    const scale = Number(logo.scale);
+    if (scale && scale !== 1) img.style.transform = `scale(${scale})`;
+  }
+
+  badge.append(img);
+  return badge;
+}
 
 function buildCard(project) {
   const card = document.createElement('div');
   card.className = 'brand-card';
 
-  const hasVideo = Boolean(project.video_url);
-  const slot = document.createElement(hasVideo ? 'button' : 'div');
+  const media = parseMedia(project.video_url);
+  const wrap = document.createElement('div');
+  wrap.className = 'slot-wrap';
+
+  const slot = document.createElement(media ? 'button' : 'div');
   slot.className = 'slot';
 
-  if (hasVideo) {
+  if (media) {
     slot.type = 'button';
     slot.classList.add('has-video');
     slot.setAttribute('aria-label', `Play video — ${project.brand_name}`);
@@ -33,16 +62,23 @@ function buildCard(project) {
       img.alt = '';
       img.loading = 'lazy';
       slot.append(img);
-    } else {
+    } else if (media.kind === 'file') {
       // No poster uploaded: let the browser paint the first frame instead.
       const preview = document.createElement('video');
       preview.className = 'slot-media';
-      preview.src = `${project.video_url}#t=0.1`;
+      preview.src = `${media.src}#t=0.1`;
       preview.muted = true;
       preview.playsInline = true;
       preview.preload = 'metadata';
       preview.tabIndex = -1;
       slot.append(preview);
+    } else {
+      // An embed cannot give us a frame, so show a tinted card instead.
+      slot.classList.add('is-embed');
+      const label = document.createElement('span');
+      label.className = 'slot-provider';
+      label.textContent = media.provider;
+      slot.append(label);
     }
 
     slot.insertAdjacentHTML('beforeend', PLAY_BADGE);
@@ -54,7 +90,7 @@ function buildCard(project) {
       slot.append(caption);
     }
 
-    slot.addEventListener('click', () => openLightbox(project, slot));
+    slot.addEventListener('click', () => openLightbox(project, media, slot));
   } else {
     slot.insertAdjacentHTML('beforeend', PLAY_BADGE);
     const label = document.createElement('span');
@@ -63,11 +99,24 @@ function buildCard(project) {
     slot.append(label);
   }
 
-  const name = document.createElement('span');
-  name.className = 'brand-name';
-  name.textContent = project.brand_name;
+  wrap.append(slot);
 
-  card.append(slot, name);
+  // The brand's logo sits on the bottom edge of the frame. Without a matching
+  // logo, fall back to the brand name underneath, as the page used to do.
+  const badge = buildBadge(project.brand_name);
+  if (badge) {
+    wrap.append(badge);
+    card.classList.add('has-badge');
+  }
+  card.append(wrap);
+
+  if (!badge) {
+    const name = document.createElement('span');
+    name.className = 'brand-name';
+    name.textContent = project.brand_name;
+    card.append(name);
+  }
+
   return card;
 }
 
@@ -85,7 +134,10 @@ function renderProjects(projects) {
     if (!grid || !rows.length) continue;
 
     const frag = document.createDocumentFragment();
-    rows.forEach((project) => frag.append(buildCard(project)));
+    // Grouped so every video for one brand sits next to its siblings.
+    for (const group of groupByBrand(rows)) {
+      for (const project of group.items) frag.append(buildCard(project));
+    }
     grid.replaceChildren(frag);
 
     const count = document.querySelector(`[data-count="${slug}"]`);
@@ -122,21 +174,33 @@ function renderLogos(logos) {
 
 const lightbox = document.getElementById('lightbox');
 const player = lightbox.querySelector('video');
+const embed = lightbox.querySelector('iframe');
 const brandLabel = lightbox.querySelector('.lightbox-brand');
 const captionLabel = lightbox.querySelector('.lightbox-caption');
 const linkOut = lightbox.querySelector('.lightbox-link');
 let lastFocused = null;
 
-function openLightbox(project, trigger) {
+function openLightbox(project, media, trigger) {
   lastFocused = trigger || null;
 
-  player.src = project.video_url;
+  const isEmbed = media.kind === 'embed';
+  player.hidden = isEmbed;
+  embed.hidden = !isEmbed;
+  if (isEmbed) {
+    embed.src = media.src;
+    embed.title = `${media.provider} video — ${project.brand_name}`;
+  } else {
+    player.src = media.src;
+  }
+
   brandLabel.textContent = project.brand_name;
   captionLabel.textContent = project.caption || '';
   captionLabel.hidden = !project.caption;
 
-  if (project.external_url) {
-    linkOut.href = project.external_url;
+  // For an embed the video URL is itself the post, so it doubles as the link.
+  const href = project.external_url || media.page;
+  if (href) {
+    linkOut.href = href;
     linkOut.hidden = false;
   } else {
     linkOut.hidden = true;
@@ -146,9 +210,11 @@ function openLightbox(project, trigger) {
   document.body.classList.add('no-scroll');
   requestAnimationFrame(() => {
     lightbox.classList.add('is-open');
-    player.play().catch(() => {
-      /* autoplay blocked — the controls are right there */
-    });
+    if (!isEmbed) {
+      player.play().catch(() => {
+        /* autoplay blocked — the controls are right there */
+      });
+    }
   });
   lightbox.querySelector('.lightbox-close').focus();
 }
@@ -163,6 +229,8 @@ function closeLightbox() {
     lightbox.hidden = true;
     player.removeAttribute('src');
     player.load();
+    // Clearing the iframe stops an embedded video that is still playing.
+    embed.removeAttribute('src');
   };
   // Wait for the fade, but never hang if the transition never fires.
   const timer = setTimeout(finish, 300);
@@ -193,11 +261,16 @@ async function load() {
     db.select('logos', 'select=*&is_published=eq.true&order=sort_order,created_at'),
   ]);
 
+  // Logos first: the cards need the lookup to draw their badges.
+  if (logos.status === 'fulfilled' && logos.value) {
+    logoByBrand = new Map(logos.value.map((l) => [brandKey(l.name), l]));
+    renderLogos(logos.value);
+  } else {
+    console.warn('Logos could not be loaded:', logos.reason);
+  }
+
   if (projects.status === 'fulfilled' && projects.value) renderProjects(projects.value);
   else console.warn('Portfolio videos could not be loaded:', projects.reason);
-
-  if (logos.status === 'fulfilled' && logos.value) renderLogos(logos.value);
-  else console.warn('Logos could not be loaded:', logos.reason);
 }
 
 load();
