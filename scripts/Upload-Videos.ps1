@@ -160,7 +160,7 @@ foreach ($group in ($files | Group-Object { Get-BrandKey $_.BaseName })) {
     foreach ($f in $group.Group) {
       $problems += [pscustomobject]@{
         File = $f.Name
-        Reason = "Matches more than one brand ($($resolved -join ', ')) — rename the file to the exact brand name"
+        Reason = "Matches more than one brand ($($resolved -join ', ')) - rename the file to the exact brand name"
       }
     }
     continue
@@ -186,18 +186,22 @@ foreach ($group in ($files | Group-Object { Get-BrandKey $_.BaseName })) {
     if ($f.Length -gt $MaxBytes) {
       $problems += [pscustomobject]@{
         File = $f.Name
-        Reason = "{0:N1} MB is over the {1:N0} MB limit" -f ($f.Length / 1MB), ($MaxBytes / 1MB)
+        Reason = ("{0:N1} MB is over the {1:N0} MB limit" -f ($f.Length / 1MB), ($MaxBytes / 1MB))
       }
       continue
     }
-    $cell = if ($i -lt $ordered.Count) { $ordered[$i] } else { $null }
+    $cell = $null
+    if ($i -lt $ordered.Count) { $cell = $ordered[$i] }
+    $replaces = $false
+    if ($cell -and $cell.video_url) { $replaces = $true }
+
     $plan += [pscustomobject]@{
       File     = $f
       Brand    = $cells[0].brand_name
       BrandKey = $key
       Category = $cells[0].category
       Cell     = $cell               # $null means a new cell gets created
-      Replaces = if ($cell -and $cell.video_url) { $true } else { $false }
+      Replaces = $replaces
     }
     $i++
   }
@@ -207,16 +211,17 @@ foreach ($group in ($files | Group-Object { Get-BrandKey $_.BaseName })) {
 Write-Host ""
 Write-Host "Plan" -ForegroundColor Cyan
 foreach ($item in $plan) {
-  $what = if (-not $item.Cell) { "new cell" }
-          elseif ($item.Replaces) { "REPLACES the video already on this cell" }
-          else { "empty cell" }
-  "{0,-42} -> {1} / {2}  ({3}, {4:N1} MB)" -f `
-    $item.File.Name, $item.Category, $item.Brand, $what, ($item.File.Length / 1MB) | Write-Host
+  $what = "empty cell"
+  if (-not $item.Cell) { $what = "new cell" }
+  elseif ($item.Replaces) { $what = "REPLACES the video already on this cell" }
+
+  $line = "{0,-34} -> {1} / {2}  ({3}, {4:N1} MB)" -f $item.File.Name, $item.Category, $item.Brand, $what, ($item.File.Length / 1MB)
+  Write-Host $line
 }
 if ($problems) {
   Write-Host ""
   Write-Host "Skipping" -ForegroundColor Yellow
-  foreach ($p in $problems) { "{0,-42} -- {1}" -f $p.File, $p.Reason | Write-Host }
+  foreach ($p in $problems) { Write-Host ("{0,-34} -- {1}" -f $p.File, $p.Reason) }
 }
 Write-Host ""
 Write-Host ("{0} to upload, {1} skipped." -f $plan.Count, $problems.Count)
