@@ -34,6 +34,14 @@ as $$
   select exists (select 1 from public.admins where user_id = auth.uid());
 $$;
 
+-- Anonymous visitors never evaluate is_admin() — their policies only test
+-- is_published — so keep it off the anon grant. Supabase's default privileges
+-- grant EXECUTE to anon explicitly, so revoking from PUBLIC alone is not
+-- enough. The authenticated grant has to stay: row level security evaluates
+-- policy expressions as the querying role, so admins could not write without it.
+revoke execute on function public.is_admin() from public, anon;
+grant execute on function public.is_admin() to authenticated;
+
 drop policy if exists "admins read own row" on public.admins;
 create policy "admins read own row" on public.admins
   for select to authenticated
@@ -83,12 +91,15 @@ create index if not exists logos_order_idx on public.logos (sort_order, created_
 
 -- ------------------------------------------------------------- updated_at --
 
+-- search_path is pinned empty (and now() fully qualified) so the function
+-- cannot be redirected by a caller's search_path.
 create or replace function public.touch_updated_at()
 returns trigger
 language plpgsql
+set search_path = ''
 as $$
 begin
-  new.updated_at = now();
+  new.updated_at = pg_catalog.now();
   return new;
 end;
 $$;
