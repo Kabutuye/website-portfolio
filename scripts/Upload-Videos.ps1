@@ -40,6 +40,11 @@ param(
 $ErrorActionPreference = 'Stop'
 # Windows PowerShell 5.1 does not always negotiate TLS 1.2 by default.
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+# .NET adds "Expect: 100-continue" to every POST. Supabase's edge closes the
+# connection instead of answering it, which surfaces as "a connection that was
+# expected to be kept alive was closed by the server".
+[Net.ServicePointManager]::Expect100Continue = $false
+[Net.ServicePointManager]::DefaultConnectionLimit = 10
 
 # The progress bar makes Invoke-RestMethod dramatically slower on large
 # transfers in Windows PowerShell 5.1.
@@ -95,11 +100,13 @@ $plain = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
 
 Write-Host "Signing in..." -ForegroundColor Cyan
 try {
-  $auth = Invoke-RestMethod -Method Post `
-    -Uri "$SupabaseUrl/auth/v1/token?grant_type=password" `
-    -Headers @{ apikey = $SupabaseKey } `
-    -ContentType 'application/json' -TimeoutSec $ApiTimeout `
-    -Body (@{ email = $Email; password = $plain } | ConvertTo-Json)
+  $auth = Invoke-WithRetry {
+    Invoke-RestMethod -Method Post `
+      -Uri "$SupabaseUrl/auth/v1/token?grant_type=password" `
+      -Headers @{ apikey = $SupabaseKey } `
+      -ContentType 'application/json' -TimeoutSec $ApiTimeout `
+      -Body (@{ email = $Email; password = $plain } | ConvertTo-Json)
+  }
 } catch {
   throw "Sign in failed. Check the email and password. ($(Get-ApiError $_))"
 } finally {
@@ -116,6 +123,21 @@ if (-not $admin) {
   throw "Signed in, but this account is not an admin. Add it to public.admins first (see README step 3)."
 }
 Write-Host "Signed in as $Email" -ForegroundColor Green
+
+# Connections to the API drop occasionally. Retry rather than losing a whole
+# run, or a 39 MB upload, to one dropped socket.
+function Invoke-WithRetry {
+  param([scriptblock] $Action, [int] $Retries = 2)
+  for ($attempt = 0; $attempt -le $Retries; $attempt++) {
+    try {
+      return & $Action
+    } catch {
+      if ($attempt -eq $Retries) { throw }
+      Write-Host "  connection dropped, retrying..." -ForegroundColor DarkGray
+      Start-Sleep -Seconds (2 * ($attempt + 1))
+    }
+  }
+}
 
 # -------------------------------------------------------------- matching ---
 # File names rarely match a brand name character for character, so both sides
@@ -281,15 +303,19 @@ foreach ($item in $plan) {
     $ctype = $ContentTypes[$file.Extension.ToLowerInvariant()]
 
     Write-Host ("Uploading {0} ({1:N1} MB)..." -f $file.Name, ($file.Length / 1MB)) -ForegroundColor Cyan
-    Invoke-RestMethod -Method Post `
-      -Uri "$SupabaseUrl/storage/v1/object/$Bucket/$objectPath" `
-      -Headers ($authHeaders + @{ 'x-upsert' = 'true' }) `
-      -ContentType $ctype -TimeoutSec $UploadTimeout -InFile $file.FullName | Out-Null
+    Invoke-WithRetry {
+      Invoke-RestMethod -Method Post `
+        -Uri "$SupabaseUrl/storage/v1/object/$Bucket/$objectPath" `
+        -Headers ($authHeaders + @{ 'x-upsert' = 'true' }) `
+        -ContentType $ctype -TimeoutSec $UploadTimeout -InFile $file.FullName
+    } | Out-Null
 
     $publicUrl = "$SupabaseUrl/storage/v1/object/public/$Bucket/$objectPath"
     $patch = @{ video_url = $publicUrl; video_path = $objectPath } | ConvertTo-Json
-    Invoke-RestMethod -Method Patch -Uri "$SupabaseUrl/rest/v1/projects?id=eq.$($cell.id)" `
-      -Headers $authHeaders -ContentType 'application/json' -TimeoutSec $ApiTimeout -Body $patch | Out-Null
+    Invoke-WithRetry {
+      Invoke-RestMethod -Method Patch -Uri "$SupabaseUrl/rest/v1/projects?id=eq.$($cell.id)" `
+        -Headers $authHeaders -ContentType 'application/json' -TimeoutSec $ApiTimeout -Body $patch
+    } | Out-Null
 
     Write-Host "  attached to $($item.Category) / $($item.Brand)" -ForegroundColor Green
     $done++
