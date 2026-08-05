@@ -41,11 +41,29 @@ $ErrorActionPreference = 'Stop'
 # Windows PowerShell 5.1 does not always negotiate TLS 1.2 by default.
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
+$Bucket = 'videos'
 $MaxBytes = 50MB
 $Extensions = @('.mp4', '.mov', '.webm', '.m4v')
 $ContentTypes = @{
   '.mp4' = 'video/mp4'; '.m4v' = 'video/x-m4v'
   '.mov' = 'video/quicktime'; '.webm' = 'video/webm'
+}
+
+# Invoke-RestMethod reports only the status code; the response body carries
+# Supabase's actual explanation, which is what you need when something fails.
+function Get-ApiError {
+  param($Record)
+  if ($Record.ErrorDetails -and $Record.ErrorDetails.Message) { return $Record.ErrorDetails.Message }
+  try {
+    $response = $Record.Exception.Response
+    if ($response) {
+      $reader = New-Object System.IO.StreamReader($response.GetResponseStream())
+      $body = $reader.ReadToEnd()
+      $reader.Close()
+      if ($body) { return $body }
+    }
+  } catch { }
+  return $Record.Exception.Message
 }
 
 # ---------------------------------------------------------------- config ---
@@ -77,7 +95,7 @@ try {
     -ContentType 'application/json' `
     -Body (@{ email = $Email; password = $plain } | ConvertTo-Json)
 } catch {
-  throw "Sign in failed. Check the email and password. ($($_.Exception.Message))"
+  throw "Sign in failed. Check the email and password. ($(Get-ApiError $_))"
 } finally {
   $plain = $null
 }
@@ -257,11 +275,11 @@ foreach ($item in $plan) {
 
     Write-Host ("Uploading {0} ({1:N1} MB)..." -f $file.Name, ($file.Length / 1MB)) -ForegroundColor Cyan
     Invoke-RestMethod -Method Post `
-      -Uri "$SupabaseUrl/storage/v1/object/$objectPath" `
+      -Uri "$SupabaseUrl/storage/v1/object/$Bucket/$objectPath" `
       -Headers ($authHeaders + @{ 'x-upsert' = 'true' }) `
       -ContentType $ctype -InFile $file.FullName | Out-Null
 
-    $publicUrl = "$SupabaseUrl/storage/v1/object/public/$objectPath"
+    $publicUrl = "$SupabaseUrl/storage/v1/object/public/$Bucket/$objectPath"
     $patch = @{ video_url = $publicUrl; video_path = $objectPath } | ConvertTo-Json
     Invoke-RestMethod -Method Patch -Uri "$SupabaseUrl/rest/v1/projects?id=eq.$($cell.id)" `
       -Headers $authHeaders -ContentType 'application/json' -Body $patch | Out-Null
@@ -269,7 +287,7 @@ foreach ($item in $plan) {
     Write-Host "  attached to $($item.Category) / $($item.Brand)" -ForegroundColor Green
     $done++
   } catch {
-    Write-Host "  FAILED: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "  FAILED: $(Get-ApiError $_)" -ForegroundColor Red
   }
 }
 
