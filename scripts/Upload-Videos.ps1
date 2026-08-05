@@ -93,13 +93,45 @@ if (-not $admin) {
 Write-Host "Signed in as $Email" -ForegroundColor Green
 
 # -------------------------------------------------------------- matching ---
+# File names rarely match a brand name character for character, so both sides
+# are reduced to letters and digits only: "Cafe NBO" and "Cafenbo" both become
+# "cafenbo", "Lavilla.ke" becomes "lavillake".
 function Get-BrandKey {
   param([string] $Name)
   $n = $Name.ToLowerInvariant()
-  $n = $n -replace '[_\-]+', ' '
-  # Drop a trailing counter: "joto ramen 2" and "joto ramen" are one brand.
-  $n = $n -replace '\s+\d+\s*$', ''
-  ($n -replace '\s+', ' ').Trim()
+  $n = $n -replace '&', 'and'
+  $n = $n -replace '[^a-z0-9]+', ''
+  # Drop a trailing counter, so "jotoramen2" is still Joto Ramen.
+  ($n -replace '\d+$', '')
+}
+
+# Names that normalising cannot reconcile. Add your own as "file name" = "brand
+# name on the site" if a video ever refuses to match.
+$Aliases = @{
+  'lillyshairandbeautyparlour' = 'Lilly Hair & Beauty Parlour'
+}
+
+# Returns the matching brand key, $null when nothing matches, or a list of keys
+# when the name is ambiguous.
+function Resolve-BrandKey {
+  param([string] $FileKey, [hashtable] $Known)
+
+  if ($Aliases.ContainsKey($FileKey)) {
+    $aliased = Get-BrandKey $Aliases[$FileKey]
+    if ($Known.ContainsKey($aliased)) { return $aliased }
+  }
+  if ($Known.ContainsKey($FileKey)) { return $FileKey }
+
+  # "Safaricom Decode" contains the brand; "lavilla" is contained by it. Short
+  # keys are excluded so a two letter name cannot swallow half the list.
+  if ($FileKey.Length -ge 4) {
+    $hits = @($Known.Keys | Where-Object {
+      ($_.Length -ge 4) -and ($_.Contains($FileKey) -or $FileKey.Contains($_))
+    })
+    if ($hits.Count -eq 1) { return $hits[0] }
+    if ($hits.Count -gt 1) { return , $hits }
+  }
+  return $null
 }
 
 $projects = Invoke-RestMethod -Headers $authHeaders `
@@ -122,12 +154,27 @@ $plan = @()
 $problems = @()
 
 foreach ($group in ($files | Group-Object { Get-BrandKey $_.BaseName })) {
-  $key = $group.Name
-  $cells = @($cellsByBrand[$key])
+  $resolved = Resolve-BrandKey -FileKey $group.Name -Known $cellsByBrand
 
-  if (-not $cells -or $cells.Count -eq 0) {
+  if ($resolved -is [array]) {
     foreach ($f in $group.Group) {
-      $problems += [pscustomobject]@{ File = $f.Name; Reason = "No brand named '$($group.Group[0].BaseName)' on the site" }
+      $problems += [pscustomobject]@{
+        File = $f.Name
+        Reason = "Matches more than one brand ($($resolved -join ', ')) — rename the file to the exact brand name"
+      }
+    }
+    continue
+  }
+
+  $key = $resolved
+  $cells = if ($key) { @($cellsByBrand[$key]) } else { @() }
+
+  if ($cells.Count -eq 0) {
+    foreach ($f in $group.Group) {
+      $problems += [pscustomobject]@{
+        File = $f.Name
+        Reason = "No brand on the site matches '$($f.BaseName)'"
+      }
     }
     continue
   }
@@ -147,6 +194,7 @@ foreach ($group in ($files | Group-Object { Get-BrandKey $_.BaseName })) {
     $plan += [pscustomobject]@{
       File     = $f
       Brand    = $cells[0].brand_name
+      BrandKey = $key
       Category = $cells[0].category
       Cell     = $cell               # $null means a new cell gets created
       Replaces = if ($cell -and $cell.video_url) { $true } else { $false }
@@ -187,7 +235,7 @@ foreach ($item in $plan) {
   try {
     $cell = $item.Cell
     if (-not $cell) {
-      $lastOrder = ($cellsByBrand[(Get-BrandKey $file.BaseName)] |
+      $lastOrder = ($cellsByBrand[$item.BrandKey] |
         Measure-Object -Property sort_order -Maximum).Maximum
       $body = @{
         category = $item.Category; brand_name = $item.Brand; sort_order = $lastOrder + 1
