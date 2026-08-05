@@ -201,6 +201,10 @@ function openLightbox(project, media, trigger) {
   const href = project.external_url || media.page;
   if (href) {
     linkOut.href = href;
+    // Name the platform when we recognise it: "View on Instagram" reads better
+    // than "View post" on a button that leaves the site.
+    const target = parseMedia(href);
+    linkOut.textContent = target?.provider ? `View on ${target.provider}` : 'View post';
     linkOut.hidden = false;
   } else {
     linkOut.hidden = true;
