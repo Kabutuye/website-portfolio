@@ -10,7 +10,6 @@ const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 // Children that stagger in behind their parent, in the order they appear.
 const STAGGER_GROUPS = [
   ['.toc-list', '.toc-item'],
-  ['.credits-list', 'li'],
   ['.grid', '.brand-card'],
 ];
 
@@ -58,6 +57,22 @@ export function initMotion() {
   );
 
   watch(document.querySelectorAll('.section, .contents, .credits, .connect, .reveal-item'));
+
+  window.addEventListener('scroll', failsafeReveal, { passive: true });
+  window.addEventListener('load', () => setTimeout(failsafeReveal, 1200));
+}
+
+// If anything is still waiting to be revealed after the page has settled, show
+// it. A reveal that never fires should cost an animation, never the content.
+function failsafeReveal() {
+  for (const el of document.querySelectorAll(
+    '.section, .contents, .credits, .connect, .reveal-item'
+  )) {
+    const box = el.getBoundingClientRect();
+    if (box.top < window.innerHeight * 1.5 && box.bottom > -window.innerHeight * 0.5) {
+      el.classList.add('is-visible');
+    }
+  }
 }
 
 // Cards are replaced once Supabase responds, so the new ones need observing.

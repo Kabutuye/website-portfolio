@@ -163,7 +163,7 @@ function buildCard(project) {
   const wrap = document.createElement('div');
   wrap.className = 'slot-wrap';
 
-  if (isPhoto) {
+  if (isPhoto && project.image_url) {
     card.classList.add('is-photo');
     wrap.append(buildPolaroid(project));
     const badge = buildBadge(project.brand_name);
@@ -218,7 +218,7 @@ function buildCard(project) {
     slot.insertAdjacentHTML('beforeend', PLAY_BADGE);
     const label = document.createElement('span');
     label.className = 'slot-label';
-    label.textContent = `Video — ${project.brand_name}`;
+    label.textContent = `${isPhoto ? 'Photo' : 'Video'} — ${project.brand_name}`;
     slot.append(label);
   }
 
@@ -243,40 +243,18 @@ function buildCard(project) {
   return card;
 }
 
-// A cell with no video and no photo is a placeholder that has not been filled
-// in yet, so it is left off the page entirely.
-function hasMedia(project) {
-  return project.media_type === 'photo'
-    ? Boolean(project.image_url)
-    : Boolean(project.video_url);
-}
-
 function renderProjects(projects) {
   const byCategory = new Map(CATEGORIES.map((c) => [c.slug, []]));
   for (const project of projects) {
-    if (byCategory.has(project.category) && hasMedia(project)) {
-      byCategory.get(project.category).push(project);
-    }
+    if (byCategory.has(project.category)) byCategory.get(project.category).push(project);
   }
 
   for (const { slug } of CATEGORIES) {
     const grid = document.querySelector(`[data-grid="${slug}"]`);
     const rows = byCategory.get(slug);
-    if (!grid) continue;
-
-    const section = document.getElementById(slug);
-    const tocItem = document.querySelector(`[data-count="${slug}"]`)?.closest('.toc-item');
-
-    // Nothing to show yet: hide the whole section rather than leaving a
-    // heading above empty space.
-    if (!rows.length) {
-      grid.replaceChildren();
-      if (section) section.hidden = true;
-      if (tocItem) tocItem.hidden = true;
-      continue;
-    }
-    if (section) section.hidden = false;
-    if (tocItem) tocItem.hidden = false;
+    // An empty category would wipe a section that still has static content in
+    // it, so leave the markup alone unless the database actually has rows.
+    if (!grid || !rows.length) continue;
 
     const frag = document.createDocumentFragment();
     // Grouped so every video for one brand sits next to its siblings.

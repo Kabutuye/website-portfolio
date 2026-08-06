@@ -647,10 +647,7 @@ body.motion-ready .reveal-item.is-visible {
   opacity: 1;
   transform: none;
 }
-/* The rotation on a card is part of the design, so it has to survive. */
-body.motion-ready .credits-list li.reveal-item {
-  transform: translateY(14px) scale(0.9);
-}
+/* The logo strip is never hidden: it fades with its section, nothing more. */
 
 /* ---------- Hero entrance ---------- */
 @keyframes rise {
