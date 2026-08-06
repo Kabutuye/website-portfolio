@@ -11,6 +11,8 @@ assets/js/              config.js, sb.js (tiny Supabase client), site.js, admin.
 assets/img/             photos and the twenty one original logos
 supabase/schema.sql     tables, row level security, storage buckets
 supabase/seed.sql       the twenty partnerships and the original logos
+supabase/site-content.sql  editable wording, and its table
+supabase/photos.sql     lets a cell hold a photo instead of a video
 vercel.json             static hosting config
 ```
 
@@ -23,7 +25,8 @@ the portfolio still loads and reads correctly.
 ### 1. Create the tables
 
 Supabase dashboard → **SQL Editor** → **New query**. Paste all of
-`supabase/schema.sql`, run it. Then do the same with `supabase/seed.sql`.
+`supabase/schema.sql`, run it. Then the same with `supabase/seed.sql`,
+`supabase/site-content.sql` and `supabase/photos.sql`.
 
 Both files are safe to run more than once — the seed skips rows that already
 exist, so it will never duplicate anything you have edited in the admin panel.
@@ -73,6 +76,19 @@ sections as the page and, inside each section, by brand. For each cell you can:
 - **↑ / ↓** on a row reorder that brand's videos, **↑ / ↓** on a brand header
   move the whole brand, **Add another video** adds a second (or third) video to
   a brand you have already worked with, and **Add a brand** starts a new one.
+
+**Videos or photos.** Not every campaign is film. The *This cell holds* dropdown
+on each row switches between **A video** and **A photo**; the upload control
+below it follows, taking an `.mp4` or an image accordingly. A photo appears on
+the site in a polaroid frame, tilted, with its caption written underneath in the
+white border and the brand's logo tucked into the corner like a sticker.
+Clicking one opens the full picture.
+
+**Empty cells never appear.** A cell with no video or photo in it is left off
+the page entirely, so an unfinished row is invisible to visitors rather than
+showing as a placeholder. Add cells whenever you need them and fill them in your
+own time. If every cell in a section is empty, that whole section and its line in
+the contents list are hidden too, rather than leaving a heading over blank space.
 
 **Working with a brand more than once.** Add each video to the same brand with
 **Add another video** and they stay side by side on the page — a brand sits

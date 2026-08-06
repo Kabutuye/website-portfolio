@@ -134,6 +134,20 @@ async function patchProject(project, fields) {
 
 function buildThumb(project) {
   const thumb = el('div', 'thumb');
+
+  if (project.media_type === 'photo') {
+    if (project.image_url) {
+      const img = el('img');
+      img.src = project.image_url;
+      img.alt = '';
+      thumb.append(img);
+      thumb.classList.add('filled');
+    } else {
+      thumb.append(el('span', null, 'No photo yet'));
+    }
+    return thumb;
+  }
+
   const media = parseMedia(project.video_url);
 
   if (project.poster_url) {
@@ -162,13 +176,14 @@ function buildThumb(project) {
 // One media slot (video or poster) with upload, link and clear controls.
 function buildMediaRow(project, kind, row) {
   const isVideo = kind === 'video';
-  const urlKey = isVideo ? 'video_url' : 'poster_url';
-  const pathKey = isVideo ? 'video_path' : 'poster_path';
+  const isPhoto = kind === 'photo';
+  const urlKey = isVideo ? 'video_url' : isPhoto ? 'image_url' : 'poster_url';
+  const pathKey = isVideo ? 'video_path' : isPhoto ? 'image_path' : 'poster_path';
   const bucket = isVideo ? VIDEO_BUCKET : IMAGE_BUCKET;
   const limit = isVideo ? VIDEO_MAX : IMAGE_MAX;
 
   const wrap = el('div', 'media-row');
-  wrap.append(el('span', 'label', isVideo ? 'Video' : 'Poster'));
+  wrap.append(el('span', 'label', isVideo ? 'Video' : isPhoto ? 'Photo' : 'Poster'));
 
   const status = el('span', 'state');
   const paint = () => {
@@ -176,7 +191,9 @@ function buildMediaRow(project, kind, row) {
     status.classList.remove('set', 'warn');
 
     if (!url) {
-      status.textContent = isVideo ? 'Empty cell' : 'Optional still frame';
+      status.textContent = isVideo ? 'Empty cell'
+        : isPhoto ? 'No photo yet'
+        : 'Optional still frame';
       return;
     }
     const media = isVideo ? parseMedia(url) : null;
@@ -208,7 +225,9 @@ function buildMediaRow(project, kind, row) {
 
   const picker = filePicker(
     project[urlKey] ? 'Replace' : 'Upload',
-    isVideo ? 'video/mp4,video/quicktime,video/webm' : 'image/png,image/jpeg,image/webp,image/avif',
+    isVideo
+      ? 'video/mp4,video/quicktime,video/webm'
+      : 'image/png,image/jpeg,image/webp,image/avif',
     async (file) => {
       if (file.size > limit) {
         toast(
@@ -244,12 +263,14 @@ function buildMediaRow(project, kind, row) {
   linkBtn.type = 'button';
   linkBtn.addEventListener('click', async () => {
     const value = prompt(
-      isVideo
+      isPhoto
+        ? 'Paste the URL of an image:'
+        : isVideo
         ? 'Paste a link.\n\n' +
           '• An Instagram, TikTok, YouTube or Vimeo post plays as an embed.\n' +
           '• A direct video file (a URL ending in .mp4) plays inline, which ' +
           'looks better — uploading the file gives you that.'
-        : 'Paste the URL of an image to use as the poster:',
+          : 'Paste the URL of an image to use as the poster:',
       project[urlKey] || ''
     );
     if (value === null) return;
@@ -341,9 +362,32 @@ function buildRow(project) {
 
   pair.append(captionField, linkField);
   body.append(pair);
+  // (the media type select is appended to `pair` just below)
 
-  body.append(buildMediaRow(project, 'video', row));
-  body.append(buildMediaRow(project, 'poster', row));
+  // What kind of campaign this cell is. Switching rebuilds the row so the
+  // upload control below matches.
+  const typeField = el('label', 'field type-field');
+  typeField.append(el('span', null, 'This cell holds'));
+  const type = el('select');
+  [['video', 'A video'], ['photo', 'A photo']].forEach(([value, label]) => {
+    const option = el('option', null, label);
+    option.value = value;
+    type.append(option);
+  });
+  type.value = project.media_type === 'photo' ? 'photo' : 'video';
+  type.addEventListener('change', async () => {
+    await guard(row, () => patchProject(project, { media_type: type.value })).catch(() => {});
+    row.replaceWith(buildRow(project));
+  });
+  typeField.append(type);
+  pair.append(typeField);
+
+  if (project.media_type === 'photo') {
+    body.append(buildMediaRow(project, 'photo', row));
+  } else {
+    body.append(buildMediaRow(project, 'video', row));
+    body.append(buildMediaRow(project, 'poster', row));
+  }
 
   // Actions.
   const actions = el('div', 'row-actions');
@@ -386,6 +430,7 @@ function buildRow(project) {
       await db.remove('projects', `id=eq.${project.id}`);
       if (project.video_path) await removeObject(VIDEO_BUCKET, project.video_path);
       if (project.poster_path) await removeObject(IMAGE_BUCKET, project.poster_path);
+      if (project.image_path) await removeObject(IMAGE_BUCKET, project.image_path);
       state.projects = state.projects.filter((p) => p.id !== project.id);
       renderProjects();
       toast('Cell deleted.');
@@ -556,7 +601,9 @@ function renderProjects() {
       el('h2', null, category.title)
     );
     const right = el('div', 'row-actions');
-    const withVideo = rows.filter((p) => p.video_url).length;
+    const withVideo = rows.filter(
+      (p) => (p.media_type === 'photo' ? p.image_url : p.video_url)
+    ).length;
     right.append(el('span', 'count', `${withVideo} of ${rows.length} filled`));
     const add = el('button', 'btn ghost tiny', 'Add a brand');
     add.type = 'button';

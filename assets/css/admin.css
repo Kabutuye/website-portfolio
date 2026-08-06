@@ -319,3 +319,8 @@ textarea { resize: vertical; min-height: 62px; }
 .content-group .actions .spacer { flex: 1; }
 .content-group.is-busy { opacity: 0.55; pointer-events: none; }
 .content-dirty { font-size: 0.76rem; color: var(--brass); font-weight: 700; }
+
+.type-field select { font-weight: 600; }
+.row .field-pair { grid-template-columns: 1fr 1fr 160px; }
+@media (max-width: 900px) { .row .field-pair { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 720px) { .row .field-pair { grid-template-columns: 1fr; } }

@@ -126,13 +126,54 @@ document.addEventListener(
   true
 );
 
+function buildPolaroid(project) {
+  const frame = document.createElement('div');
+  frame.className = 'photo-card';
+
+  const shot = document.createElement('button');
+  shot.type = 'button';
+  shot.className = 'photo-shot';
+  shot.setAttribute('aria-label', `View photo — ${project.brand_name}`);
+
+  const img = document.createElement('img');
+  img.src = project.image_url;
+  img.alt = project.caption || project.brand_name;
+  img.loading = 'lazy';
+  shot.append(img);
+  shot.addEventListener('click', () => openPhoto(project, shot));
+
+  frame.append(shot);
+
+  // The handwritten line under a polaroid: the caption, or the brand name.
+  const caption = document.createElement('p');
+  caption.className = 'photo-card-caption';
+  caption.textContent = project.caption || project.brand_name;
+  frame.append(caption);
+
+  return frame;
+}
+
 function buildCard(project) {
   const card = document.createElement('div');
   card.className = 'brand-card';
 
-  const media = parseMedia(project.video_url);
+  const isPhoto = project.media_type === 'photo';
+  const media = isPhoto ? null : parseMedia(project.video_url);
+
   const wrap = document.createElement('div');
   wrap.className = 'slot-wrap';
+
+  if (isPhoto) {
+    card.classList.add('is-photo');
+    wrap.append(buildPolaroid(project));
+    const badge = buildBadge(project.brand_name);
+    if (badge) {
+      wrap.append(badge);
+      card.classList.add('has-badge');
+    }
+    card.append(wrap);
+    return card;
+  }
 
   // An uploaded file plays in the card itself. An embed cannot, so those keep
   // opening the lightbox where the provider's iframe can live.
@@ -202,18 +243,40 @@ function buildCard(project) {
   return card;
 }
 
+// A cell with no video and no photo is a placeholder that has not been filled
+// in yet, so it is left off the page entirely.
+function hasMedia(project) {
+  return project.media_type === 'photo'
+    ? Boolean(project.image_url)
+    : Boolean(project.video_url);
+}
+
 function renderProjects(projects) {
   const byCategory = new Map(CATEGORIES.map((c) => [c.slug, []]));
   for (const project of projects) {
-    if (byCategory.has(project.category)) byCategory.get(project.category).push(project);
+    if (byCategory.has(project.category) && hasMedia(project)) {
+      byCategory.get(project.category).push(project);
+    }
   }
 
   for (const { slug } of CATEGORIES) {
     const grid = document.querySelector(`[data-grid="${slug}"]`);
     const rows = byCategory.get(slug);
-    // An empty category would wipe a section that still has static content in
-    // it, so leave the markup alone unless the database actually has rows.
-    if (!grid || !rows.length) continue;
+    if (!grid) continue;
+
+    const section = document.getElementById(slug);
+    const tocItem = document.querySelector(`[data-count="${slug}"]`)?.closest('.toc-item');
+
+    // Nothing to show yet: hide the whole section rather than leaving a
+    // heading above empty space.
+    if (!rows.length) {
+      grid.replaceChildren();
+      if (section) section.hidden = true;
+      if (tocItem) tocItem.hidden = true;
+      continue;
+    }
+    if (section) section.hidden = false;
+    if (tocItem) tocItem.hidden = false;
 
     const frag = document.createDocumentFragment();
     // Grouped so every video for one brand sits next to its siblings.
@@ -259,15 +322,51 @@ function renderLogos(logos) {
 const lightbox = document.getElementById('lightbox');
 const player = lightbox.querySelector('video');
 const embed = lightbox.querySelector('iframe');
+const photo = lightbox.querySelector('.lightbox-photo');
 const brandLabel = lightbox.querySelector('.lightbox-brand');
 const captionLabel = lightbox.querySelector('.lightbox-caption');
 const linkOut = lightbox.querySelector('.lightbox-link');
 let lastFocused = null;
 
-function openLightbox(project, media, trigger) {
-  lastFocused = trigger || null;
+function fillLightboxMeta(project, href) {
+  brandLabel.textContent = project.brand_name;
+  captionLabel.textContent = project.caption || '';
+  captionLabel.hidden = !project.caption;
 
+  if (href) {
+    linkOut.href = href;
+    const target = parseMedia(href);
+    linkOut.textContent = target?.provider ? `View on ${target.provider}` : 'View post';
+    linkOut.hidden = false;
+  } else {
+    linkOut.hidden = true;
+  }
+}
+
+function revealLightbox(trigger) {
+  for (const inline of document.querySelectorAll('video.slot-media')) inline.pause();
+  lastFocused = trigger || null;
+  lightbox.hidden = false;
+  document.body.classList.add('no-scroll');
+  requestAnimationFrame(() => lightbox.classList.add('is-open'));
+  lightbox.querySelector('.lightbox-close').focus();
+}
+
+// A photo cell opens the full image rather than a player.
+function openPhoto(project, trigger) {
+  player.hidden = true;
+  embed.hidden = true;
+  photo.hidden = false;
+  photo.src = project.image_url;
+  photo.alt = project.caption || project.brand_name;
+
+  fillLightboxMeta(project, project.external_url || null);
+  revealLightbox(trigger);
+}
+
+function openLightbox(project, media, trigger) {
   const isEmbed = media.kind === 'embed';
+  photo.hidden = true;
   player.hidden = isEmbed;
   embed.hidden = !isEmbed;
   if (isEmbed) {
@@ -277,37 +376,17 @@ function openLightbox(project, media, trigger) {
     player.src = media.src;
   }
 
-  brandLabel.textContent = project.brand_name;
-  captionLabel.textContent = project.caption || '';
-  captionLabel.hidden = !project.caption;
-
   // For an embed the video URL is itself the post, so it doubles as the link.
-  const href = project.external_url || media.page;
-  if (href) {
-    linkOut.href = href;
-    // Name the platform when we recognise it: "View on Instagram" reads better
-    // than "View post" on a button that leaves the site.
-    const target = parseMedia(href);
-    linkOut.textContent = target?.provider ? `View on ${target.provider}` : 'View post';
-    linkOut.hidden = false;
-  } else {
-    linkOut.hidden = true;
-  }
+  fillLightboxMeta(project, project.external_url || media.page);
+  revealLightbox(trigger);
 
-  // Opening an embed should silence anything playing in a card.
-  for (const inline of document.querySelectorAll('video.slot-media')) inline.pause();
-
-  lightbox.hidden = false;
-  document.body.classList.add('no-scroll');
-  requestAnimationFrame(() => {
-    lightbox.classList.add('is-open');
-    if (!isEmbed) {
+  if (!isEmbed) {
+    requestAnimationFrame(() => {
       player.play().catch(() => {
         /* autoplay blocked — the controls are right there */
       });
-    }
-  });
-  lightbox.querySelector('.lightbox-close').focus();
+    });
+  }
 }
 
 function closeLightbox() {
@@ -322,6 +401,7 @@ function closeLightbox() {
     player.load();
     // Clearing the iframe stops an embedded video that is still playing.
     embed.removeAttribute('src');
+    photo.removeAttribute('src');
   };
   // Wait for the fade, but never hang if the transition never fires.
   const timer = setTimeout(finish, 300);
