@@ -142,6 +142,13 @@ export const db = {
   select: (table, query = '') => request(`${table}${query ? `?${query}` : ''}`),
   insert: (table, rows) =>
     request(table, { method: 'POST', body: rows, prefer: 'return=representation' }),
+  // Insert, or overwrite the row that already has this primary key.
+  upsert: (table, rows) =>
+    request(table, {
+      method: 'POST',
+      body: rows,
+      prefer: 'resolution=merge-duplicates,return=representation',
+    }),
   update: (table, query, patch) =>
     request(`${table}?${query}`, { method: 'PATCH', body: patch, prefer: 'return=representation' }),
   remove: (table, query) => request(`${table}?${query}`, { method: 'DELETE' }),

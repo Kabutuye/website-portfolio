@@ -20,3 +20,48 @@ export const CATEGORIES = [
   { slug: 'home',     numeral: 'V',   name: 'Home',     title: 'Home & Lifestyle' },
   { slug: 'escape',   numeral: 'VI',  name: 'Escape',   title: 'Travel' },
 ];
+
+// Editable copy, grouped as it appears in the admin panel. Every key matches a
+// data-content attribute in index.html and a row in the site_content table.
+// `long: true` renders a textarea instead of a single line input.
+export const SITE_FIELDS = [
+  { group: 'Header', fields: [
+    { key: 'hero.eyebrow', label: 'Eyebrow above the name' },
+    { key: 'hero.intro', label: 'Introduction', long: true },
+    { key: 'hero.note', label: 'Note under the introduction', long: true },
+    { key: 'hero.photo_caption', label: 'Caption under the photo' },
+    { key: 'hero.photo_tag', label: 'Pink tag on the photo' },
+  ]},
+  { group: 'About', fields: [
+    { key: 'about.heading', label: 'Handwritten heading' },
+    { key: 'about.body1', label: 'First paragraph', long: true },
+    { key: 'about.body2', label: 'Second paragraph', long: true },
+    { key: 'about.caption', label: 'Caption under the photo' },
+  ]},
+  { group: 'Contents', fields: [
+    { key: 'contents.eyebrow', label: 'Heading above the list' },
+  ]},
+  ...['style', 'beauty', 'taste', 'everyday', 'home', 'escape'].map((slug) => ({
+    group: `Section: ${slug[0].toUpperCase()}${slug.slice(1)}`,
+    fields: [
+      { key: `section.${slug}.eyebrow`, label: 'Eyebrow' },
+      { key: `section.${slug}.title`, label: 'Title' },
+      { key: `section.${slug}.desc`, label: 'Description', long: true },
+    ],
+  })),
+  { group: 'Logos', fields: [
+    { key: 'credits.eyebrow', label: 'Heading above the logo strip' },
+  ]},
+  { group: 'Get in touch', fields: [
+    { key: 'connect.heading1', label: 'Heading, first line' },
+    { key: 'connect.heading2', label: 'Heading, second line' },
+    { key: 'connect.label', label: 'Postcard label' },
+    { key: 'contact.email', label: 'Email address' },
+    { key: 'contact.instagram', label: 'Instagram handle' },
+    { key: 'contact.phone', label: 'Phone number' },
+    { key: 'connect.note', label: 'Handwritten note' },
+  ]},
+  { group: 'Footer', fields: [
+    { key: 'footer.text', label: 'Footer line' },
+  ]},
+];

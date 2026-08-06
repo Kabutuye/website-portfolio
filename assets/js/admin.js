@@ -3,13 +3,13 @@
 import {
   db, upload, removeObject, signIn, signOut, currentSession, currentUser,
 } from './sb.js';
-import { CATEGORIES, VIDEO_BUCKET, IMAGE_BUCKET } from './config.js';
+import { CATEGORIES, VIDEO_BUCKET, IMAGE_BUCKET, SITE_FIELDS } from './config.js';
 import { parseMedia, looksLikeVideoFile, brandKey, groupByBrand } from './media.js';
 
 const VIDEO_MAX = 50 * 1024 * 1024;   // matches the bucket limit in schema.sql
 const IMAGE_MAX = 10 * 1024 * 1024;
 
-const state = { projects: [], logos: [], isAdmin: false };
+const state = { projects: [], logos: [], content: new Map(), isAdmin: false };
 
 const $ = (sel, root = document) => root.querySelector(sel);
 
@@ -107,6 +107,7 @@ $('#sign-out').addEventListener('click', async () => {
 const tabs = [
   { tab: $('#tab-videos'), panel: $('#panel-videos') },
   { tab: $('#tab-logos'), panel: $('#panel-logos') },
+  { tab: $('#tab-content'), panel: $('#panel-content') },
 ];
 tabs.forEach(({ tab }, i) => {
   tab.addEventListener('click', () => {
@@ -779,6 +780,74 @@ $('#add-logo').addEventListener('change', async (e) => {
   }
 });
 
+/* ------------------------------------------------------------ site text --- */
+
+function buildContentGroup(group) {
+  const box = el('div', 'content-group');
+  box.append(el('h2', null, group.group));
+  box.append(el('p', 'group-hint', `${group.fields.length} ` +
+    (group.fields.length === 1 ? 'piece of text' : 'pieces of text')));
+
+  const fields = el('div', 'fields');
+  const inputs = new Map();
+
+  for (const field of group.fields) {
+    const label = el('label', 'field');
+    const caption = el('span', null, field.label);
+    caption.append(el('span', 'key', `  ${field.key}`));
+    label.append(caption);
+
+    const input = el(field.long ? 'textarea' : 'input');
+    if (!field.long) input.type = 'text';
+    input.value = state.content.get(field.key) ?? '';
+    input.placeholder = 'Using the wording built into the page';
+    label.append(input);
+
+    fields.append(label);
+    inputs.set(field.key, input);
+  }
+  box.append(fields);
+
+  const actions = el('div', 'actions');
+  const dirty = el('span', 'content-dirty', '');
+  const markDirty = () => { dirty.textContent = 'Unsaved changes'; };
+  for (const input of inputs.values()) input.addEventListener('input', markDirty);
+
+  const save = el('button', 'btn tiny', 'Save this section');
+  save.type = 'button';
+  save.addEventListener('click', async () => {
+    // Upsert every field in the group in one request.
+    const rows = [...inputs.entries()].map(([key, input]) => ({
+      key,
+      value: input.value.trim(),
+    }));
+    await guard(box, async () => {
+      await db.upsert('site_content', rows);
+      for (const row of rows) state.content.set(row.key, row.value);
+      dirty.textContent = '';
+      toast(`Saved ${group.group}.`);
+    }).catch(() => {});
+  });
+
+  const revert = el('button', 'btn ghost tiny', 'Undo changes');
+  revert.type = 'button';
+  revert.addEventListener('click', () => {
+    for (const [key, input] of inputs) input.value = state.content.get(key) ?? '';
+    dirty.textContent = '';
+  });
+
+  actions.append(dirty, el('span', 'spacer'), revert, save);
+  box.append(actions);
+  return box;
+}
+
+function renderContent() {
+  const host = $('#content-groups');
+  const frag = document.createDocumentFragment();
+  for (const group of SITE_FIELDS) frag.append(buildContentGroup(group));
+  host.replaceChildren(frag);
+}
+
 /* ----------------------------------------------------------------- boot --- */
 
 function showSetupNote(html) {
@@ -813,18 +882,21 @@ async function start() {
   }
 
   try {
-    const [projects, logos] = await Promise.all([
+    const [projects, logos, content] = await Promise.all([
       db.select('projects', 'select=*&order=category,sort_order,created_at'),
       db.select('logos', 'select=*&order=sort_order,created_at'),
+      db.select('site_content', 'select=key,value'),
     ]);
     state.projects = projects || [];
     state.logos = logos || [];
+    state.content = new Map((content || []).map((row) => [row.key, row.value]));
   } catch (err) {
     toast(`Could not load content: ${err.message}`, true);
   }
 
   renderProjects();
   renderLogos();
+  renderContent();
 }
 
 if (currentSession()) {

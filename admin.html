@@ -55,6 +55,7 @@
     <div class="tabs" role="tablist">
       <button class="tab" type="button" role="tab" id="tab-videos" aria-selected="true">Videos</button>
       <button class="tab" type="button" role="tab" id="tab-logos" aria-selected="false">Client logos</button>
+      <button class="tab" type="button" role="tab" id="tab-content" aria-selected="false">Site text</button>
     </div>
 
     <section id="panel-videos" role="tabpanel" aria-labelledby="tab-videos">
@@ -77,6 +78,15 @@
         <span class="state" id="add-logo-state"></span>
       </div>
       <div class="logo-grid" id="logo-grid"></div>
+    </section>
+
+    <section id="panel-content" role="tabpanel" aria-labelledby="tab-content" hidden>
+      <p class="hint">
+        Every piece of writing on the site, in the order it appears. Edit a box and press
+        <strong>Save this section</strong>; the change is live on the next page load. Clearing a
+        box restores the wording the site ships with rather than leaving a gap.
+      </p>
+      <div id="content-groups"></div>
     </section>
   </main>
 </div>

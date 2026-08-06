@@ -7,6 +7,8 @@
 import { db } from './sb.js';
 import { CATEGORIES } from './config.js';
 import { parseMedia, brandKey, groupByBrand } from './media.js';
+import { applyContent } from './content.js';
+import { initMotion, refreshMotion, initNavHighlight } from './motion.js';
 
 const PLAY_BADGE =
   '<span class="play-badge"><svg viewBox="0 0 10 10" aria-hidden="true">' +
@@ -219,6 +221,7 @@ function renderProjects(projects) {
       for (const project of group.items) frag.append(buildCard(project));
     }
     grid.replaceChildren(frag);
+    refreshMotion(grid);
 
     const count = document.querySelector(`[data-count="${slug}"]`);
     if (count) count.textContent = String(rows.length).padStart(2, '0');
@@ -248,6 +251,7 @@ function renderLogos(logos) {
     frag.append(li);
   }
   list.replaceChildren(frag);
+  refreshMotion(list);
 }
 
 /* ------------------------------------------------------------ lightbox --- */
@@ -343,10 +347,15 @@ document.addEventListener('keydown', (e) => {
 /* ----------------------------------------------------------------- load --- */
 
 async function load() {
-  const [projects, logos] = await Promise.allSettled([
+  const [projects, logos, content] = await Promise.allSettled([
     db.select('projects', 'select=*&is_published=eq.true&order=category,sort_order,created_at'),
     db.select('logos', 'select=*&is_published=eq.true&order=sort_order,created_at'),
+    db.select('site_content', 'select=key,value'),
   ]);
+
+  // Copy first: it only ever replaces text that is already on the page.
+  if (content.status === 'fulfilled' && content.value) applyContent(content.value);
+  else console.warn('Site copy could not be loaded:', content.reason);
 
   // Logos first: the cards need the lookup to draw their badges.
   if (logos.status === 'fulfilled' && logos.value) {
@@ -360,4 +369,6 @@ async function load() {
   else console.warn('Portfolio videos could not be loaded:', projects.reason);
 }
 
+initMotion();
+initNavHighlight();
 load();
