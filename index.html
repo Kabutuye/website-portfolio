@@ -14,8 +14,41 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600;700&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,400;1,9..144,500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/assets/css/site.css">
+<script>
+  // The opening sequence plays once a visit. This has to run before the page
+  // paints, otherwise a repeat visitor sees the curtain flash up and vanish.
+  (function () {
+    var root = document.documentElement;
+    try {
+      if (sessionStorage.getItem('kt_intro') === 'done') {
+        root.classList.add('intro-seen');
+        return;
+      }
+      sessionStorage.setItem('kt_intro', 'done');
+    } catch (e) { /* private browsing: just play it */ }
+
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      root.classList.add('intro-seen');
+      return;
+    }
+    // Hold the page still while the curtain is up. The CSS ends the sequence
+    // on its own, so a failure here costs the scroll lock and nothing else.
+    root.classList.add('intro-lock');
+    setTimeout(function () { root.classList.remove('intro-lock'); }, 2400);
+  })();
+</script>
 </head>
 <body>
+
+<div id="intro" aria-hidden="true">
+  <div class="intro-panel intro-top"></div>
+  <div class="intro-panel intro-bottom"></div>
+  <div class="intro-mark">
+    <span class="intro-eyebrow">Nairobi — Content Creator</span>
+    <span class="intro-name">Kabale <em>Tuye</em></span>
+    <span class="intro-rule"></span>
+  </div>
+</div>
 
 <nav class="masthead-nav">
   <div class="wrap">

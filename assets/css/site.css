@@ -1,4 +1,8 @@
 :root {
+  /* The hero starts moving while the curtain is still parting, so the page is
+     already alive by the time it is revealed rather than arriving afterwards. */
+  --intro-delay: 1.3s;
+
   --nude: #e4cbae;
   --white: #fbf6ef;
   --espresso: #2a1b12;
@@ -667,13 +671,13 @@ body.motion-ready .reveal-item.is-visible {
   to   { opacity: 1; transform: rotate(6deg) scale(1); }
 }
 
-body.motion-ready .cover .eyebrow { animation: rise 0.7s 0.05s both cubic-bezier(0.22, 0.61, 0.36, 1); }
-body.motion-ready .cover h1       { animation: rise 0.8s 0.12s both cubic-bezier(0.22, 0.61, 0.36, 1); }
-body.motion-ready .cover-copy p   { animation: rise 0.8s 0.22s both cubic-bezier(0.22, 0.61, 0.36, 1); }
-body.motion-ready .cover-note     { animation-delay: 0.3s; }
-body.motion-ready .photo-frame    { animation: settle 1s 0.2s both cubic-bezier(0.22, 0.61, 0.36, 1); }
-body.motion-ready .blob           { animation: drift 1.2s 0.1s both ease-out; }
-body.motion-ready .photo-tag      { animation: tagPop 0.6s 0.75s both cubic-bezier(0.34, 1.56, 0.64, 1); }
+body.motion-ready .cover .eyebrow { animation: rise 0.7s calc(var(--intro-delay) + 0.05s) both cubic-bezier(0.22, 0.61, 0.36, 1); }
+body.motion-ready .cover h1       { animation: rise 0.8s calc(var(--intro-delay) + 0.12s) both cubic-bezier(0.22, 0.61, 0.36, 1); }
+body.motion-ready .cover-copy p   { animation: rise 0.8s calc(var(--intro-delay) + 0.22s) both cubic-bezier(0.22, 0.61, 0.36, 1); }
+body.motion-ready .cover-note     { animation-delay: calc(var(--intro-delay) + 0.32s); }
+body.motion-ready .photo-frame    { animation: settle 1s calc(var(--intro-delay) + 0.2s) both cubic-bezier(0.22, 0.61, 0.36, 1); }
+body.motion-ready .blob           { animation: drift 1.2s calc(var(--intro-delay) + 0.1s) both ease-out; }
+body.motion-ready .photo-tag      { animation: tagPop 0.6s calc(var(--intro-delay) + 0.75s) both cubic-bezier(0.34, 1.56, 0.64, 1); }
 
 /* ---------- Nav ---------- */
 .nav-links a { position: relative; }
@@ -818,3 +822,97 @@ body.motion-off .photo-tag { animation: none !important; }
   display: block;
 }
 .lightbox img[hidden] { display: none; }
+
+/* ==========================================================================
+   Opening sequence
+   The page starts behind a closed curtain carrying the name, which parts to
+   reveal the site. Driven entirely by CSS: if JavaScript never runs, or fails,
+   the curtain still opens on schedule and can never trap the page.
+   ========================================================================== */
+#intro {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  /* Takes itself out of play once the panels are clear of the screen. */
+  animation: introEnd 0.01s 2.35s forwards;
+}
+@keyframes introEnd {
+  to { visibility: hidden; pointer-events: none; }
+}
+
+.intro-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  /* A hair over half, so no seam shows down the middle. */
+  height: 50.2%;
+  background: var(--espresso);
+  will-change: transform;
+}
+.intro-top {
+  top: 0;
+  animation: introOpenTop 1.05s 1.2s cubic-bezier(0.76, 0, 0.24, 1) forwards;
+}
+.intro-bottom {
+  bottom: 0;
+  animation: introOpenBottom 1.05s 1.2s cubic-bezier(0.76, 0, 0.24, 1) forwards;
+}
+@keyframes introOpenTop { to { transform: translateY(-100%); } }
+@keyframes introOpenBottom { to { transform: translateY(100%); } }
+
+.intro-mark {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 24px;
+  text-align: center;
+  color: var(--white);
+  animation: introMarkOut 0.45s 1.05s ease-in forwards;
+}
+@keyframes introMarkOut {
+  to { opacity: 0; transform: translateY(-12px); }
+}
+
+.intro-eyebrow {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--nude);
+  animation: rise 0.7s 0.1s both cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.intro-name {
+  font-family: 'Fraunces', serif;
+  font-weight: 500;
+  font-size: clamp(2.6rem, 8vw, 5.4rem);
+  line-height: 0.95;
+  text-transform: uppercase;
+  letter-spacing: -0.01em;
+  animation: rise 0.9s 0.26s both cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+.intro-name em { font-style: italic; font-weight: 400; color: var(--nude); }
+
+.intro-rule {
+  display: block;
+  height: 1px;
+  width: 0;
+  background: var(--brass);
+  animation: introRule 0.8s 0.5s both cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+@keyframes introRule { to { width: min(300px, 46vw); } }
+
+/* A repeat visit within the same session, or a request for less motion, skips
+   the whole thing: no curtain, and the hero arrives straight away. */
+html.intro-seen { --intro-delay: 0s; }
+html.intro-seen #intro { display: none; }
+html.intro-lock { overflow: hidden; }
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --intro-delay: 0s; }
+  #intro { display: none; }
+  html.intro-lock { overflow: visible; }
+}
